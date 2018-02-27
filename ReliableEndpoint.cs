@@ -18,6 +18,13 @@ namespace Plukit.ReliableEndpoint {
      * TransmitPacketCallback gets called with raw packet data to be put on the network
      * call ReceivePacket with the raw packet data received from the network
      * 
+     * 
+     * buffer.Length should not be used on these buffers, the value is not useful
+     * 
+     * transmitPacketCallback(byte[] buffer, int length) -> bool (channel congested/closed)
+     * receiveMessageCallback(byte[] buffer, int offset, int length)
+     * 
+     * 
      */
 
     public class Channel {
