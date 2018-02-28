@@ -82,6 +82,7 @@ namespace Plukit.ReliableEndpoint {
         public bool Congested { get { return _congested; } }
         public bool Timeout { get { return _idleTimeout; } }
         public bool Failure { get { return _failure; } }
+        public long DebugElapsedTimeBias;
 
         public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback) {
             if (allocate == null)
@@ -105,7 +106,7 @@ namespace Plukit.ReliableEndpoint {
             //signature lsb encodes if the connection is server or clientsided, remote side must use a signature with the lowest bit flipped
             var signature = ((uint)(stamp & 0x7fffffff) << 1) | (serverSide ? 1u : 0u);
 
-            _lastReceived = _timer.ElapsedMilliseconds;
+            _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
             _localSignature = signature;
         }
 
@@ -124,7 +125,7 @@ namespace Plukit.ReliableEndpoint {
 
             FlushMessageBuffer();
             _congested = false;
-            var now = _timer.ElapsedMilliseconds;
+            var now = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
             _unackedDataSize = 0;
             var packetSent = false;
             var oldestMissingPacket = -1;
@@ -287,7 +288,7 @@ namespace Plukit.ReliableEndpoint {
             Packet packet;
             packet.SequenceId = _sendSequenceId++;
             packet.SendCount = 0;
-            packet.CreatedTS = _timer.ElapsedMilliseconds;
+            packet.CreatedTS = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
             packet.Buffer = _messageBuffer;
             packet.Length = _messageBufferOffset;
 
@@ -390,7 +391,7 @@ namespace Plukit.ReliableEndpoint {
             if (ri == 0)
                 ProcessReceiveWindow();
             _ackRequested = true;
-            _lastReceived = _timer.ElapsedMilliseconds;
+            _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
         }
 
         void ProcessReceiveWindow() {
