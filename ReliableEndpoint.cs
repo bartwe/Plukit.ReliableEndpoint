@@ -328,13 +328,14 @@ namespace Plukit.ReliableEndpoint {
 
             //Console.WriteLine("received:" + remoteSignature + ":" + sequenceId);
             if (!_remoteSignatureKnown) {
-                if (sequenceId != 0) {
-                    //Console.WriteLine("RemoteSignature not Known, sequence != 0, dropping");
-                    return; // drop, not synced
-                }
                 if ((remoteSignature & 1) == (_localSignature & 1)) {
                     //Console.WriteLine("packet received with same low bit, dropping");
                     return; // client to client or server to server packet, drop
+                }
+                if ((sequenceId != 0) && (sequenceId != -1)) {
+                    // -1 case is not ideal cause that is a resend, but only way to move when the first packet got lost
+                    //Console.WriteLine("RemoteSignature not Known, sequence != 0, dropping");
+                    return; // drop, not synced
                 }
                 _remoteSignature = remoteSignature;
                 _remoteSignatureKnown = true;
