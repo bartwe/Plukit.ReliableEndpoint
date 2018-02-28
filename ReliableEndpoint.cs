@@ -79,6 +79,8 @@ namespace Plukit.ReliableEndpoint {
         uint _remoteSignature;
         bool _remoteSignatureKnown;
 
+        bool _packetReceived;
+
         public bool Congested { get { return _congested; } }
         public bool Timeout { get { return _idleTimeout; } }
         public bool Failure { get { return _failure; } }
@@ -100,9 +102,9 @@ namespace Plukit.ReliableEndpoint {
             _receiveMessageCallback = receiveMessageCallback;
             var guid = Guid.NewGuid().ToByteArray();
             var stamp = (guid[0]) ^ (guid[1] << 8) ^ (guid[2] << 16) ^ (guid[3] << 24)
-                ^ (guid[4]) ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
-                ^ (guid[8]) ^ (guid[9] << 8) ^ (guid[10] << 16) ^ (guid[11] << 24)
-                ^ (guid[12]) ^ (guid[13] << 8) ^ (guid[14] << 16) ^ (guid[15] << 24);
+                        ^ (guid[4]) ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
+                        ^ (guid[8]) ^ (guid[9] << 8) ^ (guid[10] << 16) ^ (guid[11] << 24)
+                        ^ (guid[12]) ^ (guid[13] << 8) ^ (guid[14] << 16) ^ (guid[15] << 24);
             //signature lsb encodes if the connection is server or clientsided, remote side must use a signature with the lowest bit flipped
             var signature = ((uint)(stamp & 0x7fffffff) << 1) | (serverSide ? 1u : 0u);
 
@@ -129,14 +131,17 @@ namespace Plukit.ReliableEndpoint {
             _unackedDataSize = 0;
             var packetSent = false;
             var oldestMissingPacket = -1;
+            var oldestMissingPacketTimeStamp = long.MaxValue;
             for (var i = 0; i < _sendWindow.Count; ++i) {
                 var packet = _sendWindow[i];
                 if (packet.Buffer != null) {
-                    if (oldestMissingPacket == -1)
+                    var nextSend = CalcSendMoment(packet);
+                    if ((oldestMissingPacket == -1) || (nextSend < oldestMissingPacketTimeStamp)) {
                         oldestMissingPacket = i;
+                        oldestMissingPacketTimeStamp = nextSend;
+                    }
                     _unackedDataSize += packet.Length;
                     if ((i < WindowAckSize) || (packet.SendCount == 0)) {
-                        var nextSend = CalcSendMoment(packet);
                         if (nextSend <= now) {
                             WriteAckheader(packet.Buffer);
                             if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
@@ -159,17 +164,16 @@ namespace Plukit.ReliableEndpoint {
 
             var ackTS = _idleAckTS + ((_idleAckStandOff == 0) ? 0 : (ResendStandOff << (_idleAckStandOff - 1)));
 
-            if (_ackRequested || packetSent) {
+            if (_ackRequested || packetSent || (_packetReceived && (oldestMissingPacket != -1))) {
                 // request ack to be send immediatly next time
                 _idleAckStandOff = 0;
                 _idleAckTS = now;
                 ackTS = 0;
                 _ackRequested = false;
             }
+            _packetReceived = false;
 
             if (!packetSent && (ackTS < now)) {
-                _idleAckTS = now;
-                _idleAckStandOff++;
                 if (oldestMissingPacket == -1) {
                     var buffer = _allocate(HeaderSize);
                     buffer[0] = (byte)(_localSignature & 0xff);
@@ -180,17 +184,24 @@ namespace Plukit.ReliableEndpoint {
                     WriteAckheader(buffer);
                     if (!_transmitPacketCallback(buffer, HeaderSize))
                         _congested = true;
+                    else {
+                        _idleAckTS = now;
+                        _idleAckStandOff++;
+                    }
                     _release(buffer);
                 }
                 else {
-                    if (oldestMissingPacket != 0)
-                        throw new Exception(); // wut
                     var packet = _sendWindow[oldestMissingPacket];
                     WriteAckheader(packet.Buffer);
-                    if (!_transmitPacketCallback(packet.Buffer, packet.Length))
+                    if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
                         _congested = true;
-                    packet.SendCount++;
-                    _sendWindow[oldestMissingPacket] = packet;
+                    }
+                    else {
+                        packet.SendCount++;
+                        _sendWindow[oldestMissingPacket] = packet;
+                        _idleAckTS = now;
+                        _idleAckStandOff++;
+                    }
                 }
             }
 
@@ -334,6 +345,7 @@ namespace Plukit.ReliableEndpoint {
                     return; // client to client or server to server packet, drop
                 }
                 if ((sequenceId == 0) || ((sequenceId == -1) && (sendAckWindowhead == 0))) {
+                    //Console.WriteLine("Associate remoteSignature:" + remoteSignature);
                     _remoteSignature = remoteSignature;
                     _remoteSignatureKnown = true;
                     // -1 case is not ideal cause that is a resend, but only way to move when the first packet got lost
@@ -344,8 +356,12 @@ namespace Plukit.ReliableEndpoint {
                 }
             }
 
-            if (remoteSignature != _remoteSignature)
+            if (remoteSignature != _remoteSignature) {
+                //Console.WriteLine("Remote signature mismatch :" + remoteSignature + " expected:" + _remoteSignature);
                 return;
+            }
+
+            _packetReceived = true;
 
             AckUpto(sendAckWindowhead);
             for (var i = 0; i < WindowAckBytesSize; ++i) {
@@ -405,6 +421,7 @@ namespace Plukit.ReliableEndpoint {
                 var packet = _receiveWindow[cleanupCount];
                 if (packet.Buffer == null)
                     break;
+                //Console.WriteLine("Received packet sequence:" + packet.SequenceId);
                 _receiveMessageCallback(packet.Buffer, HeaderSize, packet.Length - HeaderSize);
                 _release(packet.Buffer);
                 packet.Buffer = null;
