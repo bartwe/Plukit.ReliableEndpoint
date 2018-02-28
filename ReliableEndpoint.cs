@@ -325,6 +325,7 @@ namespace Plukit.ReliableEndpoint {
                 return;
             var remoteSignature = ((uint)packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24));
             var sequenceId = packet[4] | (packet[5] << 8) | (packet[6] << 16) | (packet[7] << 24);
+            var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
 
             //Console.WriteLine("received:" + remoteSignature + ":" + sequenceId);
             if (!_remoteSignatureKnown) {
@@ -332,19 +333,20 @@ namespace Plukit.ReliableEndpoint {
                     //Console.WriteLine("packet received with same low bit, dropping");
                     return; // client to client or server to server packet, drop
                 }
-                if ((sequenceId != 0) && (sequenceId != -1)) {
+                if ((sequenceId == 0) || ((sequenceId == -1) && (sendAckWindowhead == 0))) {
+                    _remoteSignature = remoteSignature;
+                    _remoteSignatureKnown = true;
                     // -1 case is not ideal cause that is a resend, but only way to move when the first packet got lost
+                }
+                else {
                     //Console.WriteLine("RemoteSignature not Known, sequence != 0, dropping");
                     return; // drop, not synced
                 }
-                _remoteSignature = remoteSignature;
-                _remoteSignatureKnown = true;
             }
 
             if (remoteSignature != _remoteSignature)
                 return;
 
-            var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
             AckUpto(sendAckWindowhead);
             for (var i = 0; i < WindowAckBytesSize; ++i) {
                 var ack = packet[12 + i];
