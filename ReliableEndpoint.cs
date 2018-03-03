@@ -41,13 +41,17 @@ namespace Plukit.ReliableEndpoint {
 
         const int InitialResendDelay = 250;
         const int ResendStandOff = 16;
+        const int AckResendStandOff = 1;
 
         const int SendWindowFull = 2048;
         const int UnackedDataLimit = 1024 * 1024;
 
         const int MaxStandOff = 8;
+        const int MaxAckStandOff = 6;
 
         const int IdleTimeout = 60000;
+
+        const int ReSendAckOldestEveryNth = 5;
 
         bool _disposed;
 
@@ -55,6 +59,8 @@ namespace Plukit.ReliableEndpoint {
         int _messageBufferOffset;
 
         int _sendWindowStart;
+        int _sendWindowHighest;
+
         readonly List<Packet> _sendWindow = new List<Packet>();
 
 
@@ -70,6 +76,7 @@ namespace Plukit.ReliableEndpoint {
         bool _ackRequested;
         int _idleAckStandOff;
         long _idleAckTS;
+        int _oldestPacketResendAckIndex;
 
         long _lastReceived;
         bool _idleTimeout;
@@ -85,6 +92,8 @@ namespace Plukit.ReliableEndpoint {
         public bool Timeout { get { return _idleTimeout; } }
         public bool Failure { get { return _failure; } }
         public long DebugElapsedTimeBias;
+
+        List<int> _resendables = new List<int>();
 
         public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback) {
             if (allocate == null)
@@ -130,19 +139,13 @@ namespace Plukit.ReliableEndpoint {
             var now = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
             _unackedDataSize = 0;
             var packetSent = false;
-            var oldestMissingPacket = -1;
-            var oldestMissingPacketTimeStamp = long.MaxValue;
+            _resendables.Clear();
             for (var i = 0; i < _sendWindow.Count; ++i) {
                 var packet = _sendWindow[i];
                 if (packet.Buffer != null) {
                     var nextSend = CalcSendMoment(packet);
-                    if ((oldestMissingPacket == -1) || (nextSend < oldestMissingPacketTimeStamp)) {
-                        oldestMissingPacket = i;
-                        oldestMissingPacketTimeStamp = nextSend;
-                    }
                     _unackedDataSize += packet.Length;
-                    if ((i < WindowAckSize) || (packet.SendCount == 0)) {
-                        if (nextSend <= now) {
+                    if (((i < WindowAckSize) || (packet.SendCount == 0))&&(nextSend <= now) ) {
                             WriteAckheader(packet.Buffer);
                             if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
                                 _congested = true;
@@ -153,18 +156,21 @@ namespace Plukit.ReliableEndpoint {
                             if (packet.SendCount > MaxStandOff)
                                 packet.SendCount = MaxStandOff;
                             _sendWindow[i] = packet;
-                        }
+                    }
+                    else {
+                        if (_resendables.Count < ReSendAckOldestEveryNth)
+                            _resendables.Add(i);
                     }
                 }
             }
             CheckCongested();
 
-            if (_idleAckStandOff > MaxStandOff)
-                _idleAckStandOff = MaxStandOff;
+            if (_idleAckStandOff > MaxAckStandOff)
+                _idleAckStandOff = MaxAckStandOff;
 
-            var ackTS = _idleAckTS + ((_idleAckStandOff == 0) ? 0 : (ResendStandOff << (_idleAckStandOff - 1)));
+            var ackTS = _idleAckTS + ((_idleAckStandOff == 0) ? 0 : (AckResendStandOff << (_idleAckStandOff - 1)));
 
-            if (_ackRequested || packetSent || (_packetReceived && (oldestMissingPacket != -1))) {
+            if (_ackRequested || packetSent || _packetReceived) {
                 // request ack to be send immediatly next time
                 _idleAckStandOff = 0;
                 _idleAckTS = now;
@@ -174,6 +180,11 @@ namespace Plukit.ReliableEndpoint {
             _packetReceived = false;
 
             if (!packetSent && (ackTS < now)) {
+                if (_oldestPacketResendAckIndex >= _resendables.Count)
+                    _oldestPacketResendAckIndex= 0;
+                var oldestMissingPacket = -1;
+                if (_resendables.Count > 0)
+                    oldestMissingPacket = _resendables[_oldestPacketResendAckIndex];
                 if (oldestMissingPacket == -1) {
                     var buffer = _allocate(HeaderSize);
                     buffer[0] = (byte)(_localSignature & 0xff);
@@ -201,6 +212,7 @@ namespace Plukit.ReliableEndpoint {
                         _sendWindow[oldestMissingPacket] = packet;
                         _idleAckTS = now;
                         _idleAckStandOff++;
+                        _oldestPacketResendAckIndex++;
                     }
                 }
             }
@@ -364,8 +376,6 @@ namespace Plukit.ReliableEndpoint {
             if (length < HeaderSize)
                 throw new Exception("Packet too short. length: " + length);
 
-            _packetReceived = true;
-
             AckUpto(sendAckWindowhead);
             for (var i = 0; i < WindowAckBytesSize; ++i) {
                 var ack = packet[12 + i];
@@ -415,6 +425,7 @@ namespace Plukit.ReliableEndpoint {
             if (ri == 0)
                 ProcessReceiveWindow();
             _ackRequested = true;
+            _packetReceived = true;
             _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
         }
 
@@ -440,13 +451,15 @@ namespace Plukit.ReliableEndpoint {
         }
 
         void Ack(int idx) {
+            if (idx > _sendWindowHighest)
+                _sendWindowHighest = idx;
             if (idx < _sendWindowStart) {
-                // old ack
+                //Console.WriteLine("old ack: " + idx + " window:" + _sendWindowStart);
                 return;
             }
             var i = idx - _sendWindowStart;
             if (i >= _sendWindow.Count) {
-                //throw new Exception("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
+                //Console.WriteLine("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
                 _failure = true;
                 return;
             }
@@ -465,6 +478,9 @@ namespace Plukit.ReliableEndpoint {
             }
             if (headCleanupCount > 0) {
                 _sendWindow.RemoveRange(0, headCleanupCount);
+                _oldestPacketResendAckIndex -= headCleanupCount;
+                if (_oldestPacketResendAckIndex < 0)
+                    _oldestPacketResendAckIndex = 0;
                 _sendWindowStart += headCleanupCount;
             }
         }
@@ -472,7 +488,7 @@ namespace Plukit.ReliableEndpoint {
         void AckUpto(int idx) {
             // upto, but not including idx
             if (idx > _sendWindowStart + _sendWindow.Count) {
-                //throw new Exception("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
+                //Console.WriteLine("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
                 _failure = true;
                 return;
             }
