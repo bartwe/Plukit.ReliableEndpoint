@@ -361,6 +361,9 @@ namespace Plukit.ReliableEndpoint {
                 return;
             }
 
+            if (length < HeaderSize)
+                throw new Exception("Packet too short. length: " + length);
+
             _packetReceived = true;
 
             AckUpto(sendAckWindowhead);
@@ -404,6 +407,8 @@ namespace Plukit.ReliableEndpoint {
             if (rp.Buffer == null) {
                 rp.Buffer = _allocate(length);
                 rp.Length = length;
+                if (rp.Buffer.Length < length)
+                    throw new Exception();
                 Array.Copy(packet, offset, rp.Buffer, 0, length);
                 _receiveWindow[ri] = rp;
             }
@@ -425,6 +430,7 @@ namespace Plukit.ReliableEndpoint {
                 _receiveMessageCallback(packet.Buffer, HeaderSize, packet.Length - HeaderSize);
                 _release(packet.Buffer);
                 packet.Buffer = null;
+                _receiveWindow[cleanupCount] = packet;
                 cleanupCount++;
             }
             if (cleanupCount > 0) {
