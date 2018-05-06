@@ -93,7 +93,7 @@ namespace Plukit.ReliableEndpoint {
         public bool Failure { get { return _failure; } }
         public long DebugElapsedTimeBias;
 
-        List<int> _resendables = new List<int>();
+        readonly List<int> _resendables = new List<int>();
 
         public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback) {
             if (allocate == null)
@@ -145,17 +145,17 @@ namespace Plukit.ReliableEndpoint {
                 if (packet.Buffer != null) {
                     var nextSend = CalcSendMoment(packet);
                     _unackedDataSize += packet.Length;
-                    if (((i < WindowAckSize) || (packet.SendCount == 0))&&(nextSend <= now) ) {
-                            WriteAckheader(packet.Buffer);
-                            if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
-                                _congested = true;
-                                break;
-                            }
-                            packetSent = true;
-                            packet.SendCount++;
-                            if (packet.SendCount > MaxStandOff)
-                                packet.SendCount = MaxStandOff;
-                            _sendWindow[i] = packet;
+                    if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
+                        WriteAckheader(packet.Buffer);
+                        if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
+                            _congested = true;
+                            break;
+                        }
+                        packetSent = true;
+                        packet.SendCount++;
+                        if (packet.SendCount > MaxStandOff)
+                            packet.SendCount = MaxStandOff;
+                        _sendWindow[i] = packet;
                     }
                     else {
                         if (_resendables.Count < ReSendAckOldestEveryNth)
@@ -181,7 +181,7 @@ namespace Plukit.ReliableEndpoint {
 
             if (!packetSent && (ackTS < now)) {
                 if (_oldestPacketResendAckIndex >= _resendables.Count)
-                    _oldestPacketResendAckIndex= 0;
+                    _oldestPacketResendAckIndex = 0;
                 var oldestMissingPacket = -1;
                 if (_resendables.Count > 0)
                     oldestMissingPacket = _resendables[_oldestPacketResendAckIndex];

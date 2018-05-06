@@ -1,8 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Plukit.ReliableEndpoint {
     class TestA {
@@ -12,15 +9,15 @@ namespace Plukit.ReliableEndpoint {
             BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
 
 
-            for (int i = 0; i<1024*1024; ++i) {
+            for (var i = 0; i < 1024 * 1024; ++i) {
                 var b = new byte[1];
-                b[0] = (byte)(i&0x7f);
+                b[0] = (byte)(i & 0x7f);
                 AChannel.SendMessage(b, 0, 1);
                 b[0] = (byte)(i & 0x7f | 0x80);
                 BChannel.SendMessage(b, 0, 1);
             }
 
-            for (int i = 0; i<1000; ++i) {
+            for (var i = 0; i < 1000; ++i) {
                 AChannel.Update();
                 BChannel.Update();
             }
@@ -28,8 +25,8 @@ namespace Plukit.ReliableEndpoint {
 
             var ac = 0;
             foreach (var a in AReceived) {
-                for (int i = 0; i<a.Length; ++i) {
-                    var x = ac+i;
+                for (var i = 0; i < a.Length; ++i) {
+                    var x = ac + i;
                     var y = (byte)(x & 0x7f | 0x80);
                     if (a[i] != y)
                         throw new Exception();
@@ -39,7 +36,7 @@ namespace Plukit.ReliableEndpoint {
 
             var bc = 0;
             foreach (var b in BReceived) {
-                for (int i = 0; i < b.Length; ++i) {
+                for (var i = 0; i < b.Length; ++i) {
                     var x = bc + i;
                     var y = (byte)(x & 0x7f);
                     if (b[i] != y)
@@ -48,24 +45,23 @@ namespace Plukit.ReliableEndpoint {
                 bc += b.Length;
             }
 
-            if (ac != 1024*1024)
+            if (ac != 1024 * 1024)
                 throw new Exception();
             if (bc != 1024 * 1024)
                 throw new Exception();
-
         }
 
         static void ReceiveMessageB(byte[] buffer, int offset, int length) {
             var b = new byte[length];
-            for (int i = 0; i < length; ++i)
+            for (var i = 0; i < length; ++i)
                 b[i] = buffer[offset + i];
             BReceived.Add(b);
         }
 
         static void ReceiveMessageA(byte[] buffer, int offset, int length) {
             var b = new byte[length];
-            for (int i = 0; i<length;++i)
-                b[i] = buffer[offset+i];
+            for (var i = 0; i < length; ++i)
+                b[i] = buffer[offset + i];
             AReceived.Add(b);
         }
 
@@ -80,7 +76,7 @@ namespace Plukit.ReliableEndpoint {
         }
 
         static void Release(byte[] obj) {
-            for (int i = 0; i<obj.Length; ++i)
+            for (var i = 0; i < obj.Length; ++i)
                 obj[i] = 0xff;
         }
 
