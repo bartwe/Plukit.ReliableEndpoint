@@ -252,7 +252,7 @@ namespace Plukit.ReliableEndpoint {
 
         bool CanAckReceived(int sequence) {
             if (sequence < _receiveWindowStart)
-                throw new Exception();
+                throw new Exception("Sequence from before window start " + sequence + " " + _receiveWindowStart);
             var idx = sequence - _receiveWindowStart;
             if (idx >= _receiveWindow.Count)
                 return false;
@@ -400,7 +400,7 @@ namespace Plukit.ReliableEndpoint {
             }
             if (sequenceId == -1) {
                 if (length != HeaderSize)
-                    throw new Exception();
+                    throw new Exception("Header length incorrect " + length + " " + HeaderSize);
                 return; // dataless ack
             }
             if (sequenceId < _receiveWindowStart)
@@ -413,12 +413,12 @@ namespace Plukit.ReliableEndpoint {
             }
             var rp = _receiveWindow[ri];
             if (rp.SequenceId != sequenceId)
-                throw new Exception();
+                throw new Exception("SequnceId mismatch " + rp.SequenceId + " " + sequenceId);
             if (rp.Buffer == null) {
                 rp.Buffer = _allocate(length);
                 rp.Length = length;
                 if (rp.Buffer.Length < length)
-                    throw new Exception();
+                    throw new Exception("Incorrect length " + rp.Buffer.Length + " " + length);
                 Array.Copy(packet, offset, rp.Buffer, 0, length);
                 _receiveWindow[ri] = rp;
             }
