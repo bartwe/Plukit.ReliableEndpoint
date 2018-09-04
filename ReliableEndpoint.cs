@@ -35,18 +35,19 @@ namespace Plukit.ReliableEndpoint {
         readonly Action<byte[]> _release;
 
         const int WindowAckSize = 256;
-        const int WindowAckBytesSize = 256 / 8;
+        const int WindowAckBytesSize = WindowAckSize / 8;
         const int OuterPacketSize = 1200;
         const int HeaderSize = 4 + 4 + 4 + WindowAckBytesSize;
 
-        const int InitialResendDelay = 250;
-        const int ResendStandOff = 16;
+        const int InitialResendDelay = 1000;
+        const int MissedResendDelay = 250;
+        const int ResendStandOff = 128;
         const int AckResendStandOff = 1;
 
         const int SendWindowFull = 2048;
         const int UnackedDataLimit = 1024 * 1024;
 
-        const int MaxStandOff = 8;
+        const int MaxStandOff = 6;
         const int MaxAckStandOff = 6;
 
         const int IdleTimeout = 60000;
@@ -59,7 +60,7 @@ namespace Plukit.ReliableEndpoint {
         int _messageBufferOffset;
 
         int _sendWindowStart;
-        int _sendWindowHighest;
+        int _sendWindowHighestAck;
 
         readonly List<Packet> _sendWindow = new List<Packet>();
 
@@ -143,7 +144,7 @@ namespace Plukit.ReliableEndpoint {
             for (var i = 0; i < _sendWindow.Count; ++i) {
                 var packet = _sendWindow[i];
                 if (packet.Buffer != null) {
-                    var nextSend = CalcSendMoment(packet);
+                    var nextSend = CalcSendMoment(packet, (i + _sendWindowStart) > _sendWindowHighestAck);
                     _unackedDataSize += packet.Length;
                     if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
                         WriteAckheader(packet.Buffer);
@@ -152,6 +153,7 @@ namespace Plukit.ReliableEndpoint {
                             break;
                         }
                         packetSent = true;
+
                         packet.SendCount++;
                         if (packet.SendCount > MaxStandOff)
                             packet.SendCount = MaxStandOff;
@@ -197,6 +199,7 @@ namespace Plukit.ReliableEndpoint {
                         _congested = true;
                     else {
                         _idleAckTS = now;
+
                         _idleAckStandOff++;
                     }
                     _release(buffer);
@@ -210,9 +213,9 @@ namespace Plukit.ReliableEndpoint {
                     else {
                         packet.SendCount++;
                         _sendWindow[oldestMissingPacket] = packet;
+                        _oldestPacketResendAckIndex++;
                         _idleAckTS = now;
                         _idleAckStandOff++;
-                        _oldestPacketResendAckIndex++;
                     }
                 }
             }
@@ -266,10 +269,10 @@ namespace Plukit.ReliableEndpoint {
                 _congested = true;
         }
 
-        long CalcSendMoment(Packet packet) {
+        long CalcSendMoment(Packet packet, bool beyondAckHead) {
             if (packet.SendCount == 0)
                 return 0;
-            return packet.CreatedTS + InitialResendDelay + ResendStandOff << (packet.SendCount - 1);
+            return packet.CreatedTS + (beyondAckHead ? InitialResendDelay : MissedResendDelay) + ResendStandOff << (packet.SendCount - 1);
         }
 
         // can take an arbitrarily sized message
@@ -451,8 +454,8 @@ namespace Plukit.ReliableEndpoint {
         }
 
         void Ack(int idx) {
-            if (idx > _sendWindowHighest)
-                _sendWindowHighest = idx;
+            if (idx > _sendWindowHighestAck)
+                _sendWindowHighestAck = idx;
             if (idx < _sendWindowStart) {
                 //Console.WriteLine("old ack: " + idx + " window:" + _sendWindowStart);
                 return;
