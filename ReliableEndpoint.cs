@@ -30,6 +30,7 @@ namespace Plukit.ReliableEndpoint {
     public class Channel {
         readonly Func<byte[], int, bool> _transmitPacketCallback;
         readonly Action<byte[], int, int> _receiveMessageCallback;
+        bool _receiveMessageCallbackTakesOwnership;
 
         readonly Func<int, byte[]> _allocate;
         readonly Action<byte[]> _release;
@@ -96,7 +97,7 @@ namespace Plukit.ReliableEndpoint {
 
         readonly List<int> _resendables = new List<int>();
 
-        public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback) {
+        public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback, bool receiveMessageCallbackTakesOwnership) {
             if (allocate == null)
                 throw new ArgumentNullException("allocate");
             if (release == null)
@@ -110,6 +111,7 @@ namespace Plukit.ReliableEndpoint {
             _release = release;
             _transmitPacketCallback = transmitPacketCallback;
             _receiveMessageCallback = receiveMessageCallback;
+            _receiveMessageCallbackTakesOwnership = receiveMessageCallbackTakesOwnership;
             var guid = Guid.NewGuid().ToByteArray();
             var stamp = (guid[0]) ^ (guid[1] << 8) ^ (guid[2] << 16) ^ (guid[3] << 24)
                         ^ (guid[4]) ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
@@ -173,7 +175,7 @@ namespace Plukit.ReliableEndpoint {
             var ackTS = _idleAckTS + ((_idleAckStandOff == 0) ? 0 : (AckResendStandOff << (_idleAckStandOff - 1)));
 
             if (_ackRequested || packetSent || _packetReceived) {
-                // request ack to be send immediatly next time
+                // request ack to be send immediately next time
                 _idleAckStandOff = 0;
                 _idleAckTS = now;
                 ackTS = 0;
@@ -442,7 +444,8 @@ namespace Plukit.ReliableEndpoint {
                     break;
                 //Console.WriteLine("Received packet sequence:" + packet.SequenceId);
                 _receiveMessageCallback(packet.Buffer, HeaderSize, packet.Length - HeaderSize);
-                _release(packet.Buffer);
+                if (!_receiveMessageCallbackTakesOwnership)
+                    _release(packet.Buffer);
                 packet.Buffer = null;
                 _receiveWindow[cleanupCount] = packet;
                 cleanupCount++;
