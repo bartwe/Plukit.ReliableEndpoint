@@ -29,8 +29,8 @@ namespace Plukit.ReliableEndpoint {
             APacketBuffer = new Queue<KeyValuePair<long, byte[]>>();
             BPacketBuffer = new Queue<KeyValuePair<long, byte[]>>();
 
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
+            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA, false);
+            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB, false);
 
             LineLagMin = 300;
             LineLagMax = 400;

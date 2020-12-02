@@ -5,8 +5,8 @@ namespace Plukit.ReliableEndpoint {
     class TestB {
         // some packet drops
         public static void Run() {
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
+            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA, false);
+            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB, false);
 
 
             for (var i = 0; i < 1024 * 1024; ++i) {
