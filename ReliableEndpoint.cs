@@ -223,6 +223,9 @@ namespace Plukit.ReliableEndpoint {
             }
 
             _idleTimeout = ((_receiveWindow.Count > 0) || (_sendWindow.Count > 0)) && (now - _lastReceived > IdleTimeout);
+            if (_idleTimeout) {
+                //Console.WriteLine("_idleTimeout: " + _idleTimeout + " rw: " + _receiveWindow.Count + " sw: " + _sendWindow.Count + " now: " + now + " _lastReceived: " + _lastReceived);
+            }
         }
 
         void WriteAckheader(byte[] buffer) {
@@ -403,32 +406,34 @@ namespace Plukit.ReliableEndpoint {
                 if ((ack & 0x80) != 0)
                     Ack(sendAckWindowhead + i * 8 + 7);
             }
-            if (sequenceId == -1) {
+            if (sequenceId != -1) {
+                if (sequenceId >= _receiveWindowStart) {
+                    var ri = sequenceId - _receiveWindowStart;
+                    while (ri >= _receiveWindow.Count) {
+                        var p = new Packet();
+                        p.SequenceId = _receiveWindowStart + _receiveWindow.Count;
+                        _receiveWindow.Add(p);
+                    }
+                    var rp = _receiveWindow[ri];
+                    if (rp.SequenceId != sequenceId)
+                        throw new Exception("SequnceId mismatch " + rp.SequenceId + " " + sequenceId);
+                    if (rp.Buffer == null) {
+                        rp.Buffer = _allocate(length);
+                        rp.Length = length;
+                        if (rp.Buffer.Length < length)
+                            throw new Exception("Incorrect length " + rp.Buffer.Length + " " + length);
+                        Array.Copy(packet, offset, rp.Buffer, 0, length);
+                        _receiveWindow[ri] = rp;
+                    }
+                    if (ri == 0)
+                        ProcessReceiveWindow();
+                }
+            }
+            else {
+                // dataless ack
                 if (length != HeaderSize)
                     throw new Exception("Header length incorrect " + length + " " + HeaderSize);
-                return; // dataless ack
             }
-            if (sequenceId < _receiveWindowStart)
-                return; // old duplicate receive
-            var ri = sequenceId - _receiveWindowStart;
-            while (ri >= _receiveWindow.Count) {
-                var p = new Packet();
-                p.SequenceId = _receiveWindowStart + _receiveWindow.Count;
-                _receiveWindow.Add(p);
-            }
-            var rp = _receiveWindow[ri];
-            if (rp.SequenceId != sequenceId)
-                throw new Exception("SequnceId mismatch " + rp.SequenceId + " " + sequenceId);
-            if (rp.Buffer == null) {
-                rp.Buffer = _allocate(length);
-                rp.Length = length;
-                if (rp.Buffer.Length < length)
-                    throw new Exception("Incorrect length " + rp.Buffer.Length + " " + length);
-                Array.Copy(packet, offset, rp.Buffer, 0, length);
-                _receiveWindow[ri] = rp;
-            }
-            if (ri == 0)
-                ProcessReceiveWindow();
             _ackRequested = true;
             _packetReceived = true;
             _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
