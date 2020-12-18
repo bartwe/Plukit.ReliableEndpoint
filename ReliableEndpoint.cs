@@ -30,7 +30,7 @@ namespace Plukit.ReliableEndpoint {
     public class Channel {
         readonly Func<byte[], int, bool> _transmitPacketCallback;
         readonly Action<byte[], int, int> _receiveMessageCallback;
-        bool _receiveMessageCallbackTakesOwnership;
+        readonly bool _receiveMessageCallbackTakesOwnership;
 
         readonly Func<int, byte[]> _allocate;
         readonly Action<byte[]> _release;
@@ -39,6 +39,8 @@ namespace Plukit.ReliableEndpoint {
         const int WindowAckBytesSize = WindowAckSize / 8;
         const int OuterPacketSize = 1200;
         const int HeaderSize = 4 + 4 + 4 + WindowAckBytesSize;
+
+        const int MetaPacketSize = 1;
 
         const int InitialResendDelay = 1000;
         const int MissedResendDelay = 250;
@@ -51,7 +53,9 @@ namespace Plukit.ReliableEndpoint {
         const int MaxStandOff = 6;
         const int MaxAckStandOff = 6;
 
-        const int IdleTimeout = 60000;
+        const int IdleTimeout = 20000;
+        const int DisconnectTimeout = 3000;
+        const int DisconnectLoopsTimeoutRatio = 10;
 
         const int ReSendAckOldestEveryNth = 5;
 
@@ -90,12 +94,16 @@ namespace Plukit.ReliableEndpoint {
 
         bool _packetReceived;
 
-        public bool Congested { get { return _congested; } }
-        public bool Timeout { get { return _idleTimeout; } }
-        public bool Failure { get { return _failure; } }
-        public long DebugElapsedTimeBias;
-
         readonly List<int> _resendables = new List<int>();
+
+        public bool Congested => _congested;
+        public bool Timeout => _idleTimeout && !_disconnecting;
+        public bool Failure => _failure;
+        public bool Disconnected => _failure || _idleTimeout;
+        public bool Disconnecting => Disconnected || _disconnecting;
+        public long DebugElapsedTimeBias;
+        bool _disconnecting;
+        int _disconnectedLoops;
 
         public Channel(bool serverSide, Func<int, byte[]> allocate, Action<byte[]> release, Func<byte[], int, bool> transmitPacketCallback, Action<byte[], int, int> receiveMessageCallback, bool receiveMessageCallbackTakesOwnership) {
             if (allocate == null)
@@ -128,46 +136,58 @@ namespace Plukit.ReliableEndpoint {
             if (_disposed)
                 throw new ObjectDisposedException(GetType().Name);
             _disposed = true;
+            _failure = true;
+
+            _resendables.Clear();
+
+            for (var i = 0; i < _sendWindow.Count; ++i)
+                _release(_sendWindow[i].Buffer);
+            _sendWindow.Clear();
+            for (var i = 0; i < _receiveWindow.Count; ++i)
+                _release(_receiveWindow[i].Buffer);
+            _receiveWindow.Clear();
         }
 
         public void Update() {
             if (_disposed)
                 throw new ObjectDisposedException(GetType().Name);
 
-            if (Failure)
+            if (Disconnected)
                 return;
 
             FlushMessageBuffer();
             _congested = false;
             var now = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
-            _unackedDataSize = 0;
             var packetSent = false;
-            _resendables.Clear();
-            for (var i = 0; i < _sendWindow.Count; ++i) {
-                var packet = _sendWindow[i];
-                if (packet.Buffer != null) {
-                    var nextSend = CalcSendMoment(packet, (i + _sendWindowStart) > _sendWindowHighestAck);
-                    _unackedDataSize += packet.Length;
-                    if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
-                        WriteAckheader(packet.Buffer);
-                        if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
-                            _congested = true;
-                            break;
-                        }
-                        packetSent = true;
+            if (!Disconnecting) {
+                _unackedDataSize = 0;
+                _resendables.Clear();
+                for (var i = 0; i < _sendWindow.Count; ++i) {
+                    var packet = _sendWindow[i];
+                    if (packet.Buffer != null) {
+                        var nextSend = CalcSendMoment(packet, (i + _sendWindowStart) > _sendWindowHighestAck);
+                        _unackedDataSize += packet.Length;
+                        if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
+                            WriteAckheader(packet.Buffer);
+                            if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
+                                _congested = true;
+                                break;
+                            }
+                            packetSent = true;
 
-                        packet.SendCount++;
-                        if (packet.SendCount > MaxStandOff)
-                            packet.SendCount = MaxStandOff;
-                        _sendWindow[i] = packet;
-                    }
-                    else {
-                        if (_resendables.Count < ReSendAckOldestEveryNth)
-                            _resendables.Add(i);
+                            packet.SendCount++;
+                            if (packet.SendCount > MaxStandOff)
+                                packet.SendCount = MaxStandOff;
+                            _sendWindow[i] = packet;
+                        }
+                        else {
+                            if (_resendables.Count < ReSendAckOldestEveryNth)
+                                _resendables.Add(i);
+                        }
                     }
                 }
+                CheckCongested();
             }
-            CheckCongested();
 
             if (_idleAckStandOff > MaxAckStandOff)
                 _idleAckStandOff = MaxAckStandOff;
@@ -183,21 +203,28 @@ namespace Plukit.ReliableEndpoint {
             }
             _packetReceived = false;
 
-            if (!packetSent && (ackTS < now)) {
+            if (Disconnecting || (!packetSent && (ackTS < now))) {
                 if (_oldestPacketResendAckIndex >= _resendables.Count)
                     _oldestPacketResendAckIndex = 0;
                 var oldestMissingPacket = -1;
                 if (_resendables.Count > 0)
                     oldestMissingPacket = _resendables[_oldestPacketResendAckIndex];
-                if (oldestMissingPacket == -1) {
-                    var buffer = _allocate(HeaderSize);
+                var sendMetaPacket = Disconnecting || (oldestMissingPacket == -1);
+                if (sendMetaPacket) {
+                    var bufferSize = HeaderSize + 2;
+                    var buffer = _allocate(bufferSize);
                     buffer[0] = (byte)(_localSignature & 0xff);
                     buffer[1] = (byte)((_localSignature >> 8) & 0xff);
                     buffer[2] = (byte)((_localSignature >> 16) & 0xff);
                     buffer[3] = (byte)((_localSignature >> 24) & 0xff);
                     buffer[4] = buffer[5] = buffer[6] = buffer[7] = 255;
                     WriteAckheader(buffer);
-                    if (!_transmitPacketCallback(buffer, HeaderSize))
+                    var messageSize = HeaderSize;
+                    if (Disconnecting) {
+                        buffer[messageSize++] = 99; // 'c' close
+                        buffer[messageSize++] = (byte)((_disconnectedLoops > 255) ? 255 : _disconnectedLoops);
+                    }
+                    if (!_transmitPacketCallback(buffer, messageSize))
                         _congested = true;
                     else {
                         _idleAckTS = now;
@@ -222,9 +249,16 @@ namespace Plukit.ReliableEndpoint {
                 }
             }
 
-            _idleTimeout = ((_receiveWindow.Count > 0) || (_sendWindow.Count > 0)) && (now - _lastReceived > IdleTimeout);
+            var idleTimeout = IdleTimeout;
+            if (_disconnecting) {
+                if (_disconnectedLoops >= DisconnectLoopsTimeoutRatio)
+                    idleTimeout = 0;
+                else
+                    idleTimeout = DisconnectTimeout * (DisconnectLoopsTimeoutRatio - _disconnectedLoops) / DisconnectLoopsTimeoutRatio;
+            }
+            _idleTimeout = (now - _lastReceived > idleTimeout);
             if (_idleTimeout) {
-                //Console.WriteLine("_idleTimeout: " + _idleTimeout + " rw: " + _receiveWindow.Count + " sw: " + _sendWindow.Count + " now: " + now + " _lastReceived: " + _lastReceived);
+                //Console.WriteLine("_idleTimeout: " + _idleTimeout + " rw: " + _receiveWindow.Count + " sw: " + _sendWindow.Count + " now: " + now + " _lastReceived: " + _lastReceived+" _disconnected: "+_disconnected);
             }
         }
 
@@ -293,6 +327,9 @@ namespace Plukit.ReliableEndpoint {
             if (offset + length > message.Length)
                 throw new ArgumentOutOfRangeException("offset + length exceed message size");
 
+            if (Disconnecting || Disconnected)
+                return;
+
             while (length > 0) {
                 if (_messageBuffer == null) {
                     _messageBuffer = _allocate(OuterPacketSize);
@@ -340,6 +377,10 @@ namespace Plukit.ReliableEndpoint {
             CheckCongested();
         }
 
+        public void Close() {
+            _disconnecting = true;
+        }
+
         // packets need to be received whole, as sent 
         public void ReceivePacket(byte[] packet, int offset, int length) {
             if (_disposed)
@@ -354,7 +395,10 @@ namespace Plukit.ReliableEndpoint {
                 throw new ArgumentOutOfRangeException("offset + length exceed packet size");
             if (length == 0)
                 return;
-            var remoteSignature = ((uint)packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24));
+            if (offset != 0)
+                throw new NotImplementedException();
+
+            var remoteSignature = (packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24));
             var sequenceId = packet[4] | (packet[5] << 8) | (packet[6] << 16) | (packet[7] << 24);
             var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
 
@@ -430,13 +474,31 @@ namespace Plukit.ReliableEndpoint {
                 }
             }
             else {
-                // dataless ack
-                if (length != HeaderSize)
-                    throw new Exception("Header length incorrect " + length + " " + HeaderSize);
+                var commandOffset = HeaderSize;
+                while (commandOffset < length) {
+                    switch (packet[commandOffset + 0]) {
+                        case 99: // 'c' close command
+                            commandOffset++;
+                            if (commandOffset == length)
+                                break;
+                            var loops = packet[commandOffset];
+                            if (!_disconnecting)
+                                _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
+                            _disconnecting = true;
+                            if (loops >= _disconnectedLoops)
+                                _disconnectedLoops = loops + 1;
+                            commandOffset++;
+                            continue;
+                        default:
+                            throw new Exception("Packet with unknown meta command: " + packet[HeaderSize + 0]);
+                    }
+                    throw new Exception("Meta command incorrect length " + length + " " + HeaderSize + " " + commandOffset);
+                }
             }
             _ackRequested = true;
             _packetReceived = true;
-            _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
+            if (!_disconnecting)
+                _lastReceived = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
         }
 
         void ProcessReceiveWindow() {
@@ -514,6 +576,25 @@ namespace Plukit.ReliableEndpoint {
             public long CreatedTS;
             public byte[] Buffer;
             public int Length;
+        }
+
+        public static bool IsValidStartingPacket(byte[] packet, int length) {
+            if (packet == null)
+                throw new ArgumentNullException("message");
+            if (length < 0)
+                throw new ArgumentOutOfRangeException("negative length not allowed.");
+            if ( length > packet.Length)
+                throw new ArgumentOutOfRangeException("length exceed packet size");
+            if (length == 0)
+                return false;
+
+            var sequenceId = packet[4] | (packet[5] << 8) | (packet[6] << 16) | (packet[7] << 24);
+            var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
+
+            if ((sequenceId == 0) && (sendAckWindowhead == 0)) {
+                return true; // first package
+            }
+            return false;
         }
     }
 }
