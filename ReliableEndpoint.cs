@@ -37,7 +37,7 @@ namespace Plukit.ReliableEndpoint {
 
         const int WindowAckSize = 256;
         const int WindowAckBytesSize = WindowAckSize / 8;
-        const int OuterPacketSize = 1200;
+        const int OuterPacketSize = 1100;
         const int HeaderSize = 4 + 4 + 4 + WindowAckBytesSize;
 
         const int MetaPacketSize = 1;
