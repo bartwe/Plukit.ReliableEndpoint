@@ -61,7 +61,7 @@ namespace Plukit.ReliableEndpoint {
 
         bool _disposed;
 
-        byte[] _messageBuffer;
+        byte[]? _messageBuffer;
         int _messageBufferOffset;
 
         int _sendWindowStart;
@@ -141,10 +141,10 @@ namespace Plukit.ReliableEndpoint {
             _resendables.Clear();
 
             for (var i = 0; i < _sendWindow.Count; ++i)
-                _release(_sendWindow[i].Buffer);
+                _release(_sendWindow[i].Buffer!);
             _sendWindow.Clear();
             for (var i = 0; i < _receiveWindow.Count; ++i)
-                _release(_receiveWindow[i].Buffer);
+                _release(_receiveWindow[i].Buffer!);
             _receiveWindow.Clear();
         }
 
@@ -235,8 +235,8 @@ namespace Plukit.ReliableEndpoint {
                 }
                 else {
                     var packet = _sendWindow[oldestMissingPacket];
-                    WriteAckheader(packet.Buffer);
-                    if (!_transmitPacketCallback(packet.Buffer, packet.Length)) {
+                    WriteAckheader(packet.Buffer!);
+                    if (!_transmitPacketCallback(packet.Buffer!, packet.Length)) {
                         _congested = true;
                     }
                     else {
@@ -574,7 +574,7 @@ namespace Plukit.ReliableEndpoint {
             public int SequenceId;
             public int SendCount;
             public long CreatedTS;
-            public byte[] Buffer;
+            public byte[]? Buffer;
             public int Length;
         }
 
