@@ -1,26 +1,29 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Plukit.ReliableEndpoint {
-    class TestC {
+    public class TestC {
         // out of order/duplicate/dropped delivery
         public static void Run() {
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA, false);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB, false);
+            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
+            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
 
 
             for (var i = 0; i < 1024 * 1024; ++i) {
                 var b = new byte[1];
                 b[0] = (byte)(i & 0x7f);
-                AChannel.SendMessage(b, 0, 1);
+                AChannel.SendMessage(new(b, 0, 1));
                 b[0] = (byte)(i & 0x7f | 0x80);
-                BChannel.SendMessage(b, 0, 1);
+                BChannel.SendMessage(new(b, 0, 1));
             }
 
-            for (var i = 0; i < 10000; ++i) {
+            for (var i = 0; i < 100; ++i) {
                 AChannel.Update();
                 BChannel.Update();
+
+                //    Thread.Sleep(1);
 
 
                 var bias = Random.Next(1000);
@@ -28,35 +31,36 @@ namespace Plukit.ReliableEndpoint {
                 BChannel.DebugElapsedTimeBias += bias;
 
 
-                if (APacketBuffer.Count > 0) {
-                    var a = Random.Next(APacketBuffer.Count);
-                    var act = Random.Next(2);
-                    if (act == 0) {
-                        var buffer = APacketBuffer[a];
-                        AChannel.ReceivePacket(buffer, 0, buffer.Length);
-                    }
-                    else
-                        APacketBuffer.RemoveAt(a);
-                }
-
                 if (APacketBuffer.Count > 1000) {
                     APacketBuffer.Clear();
                 }
-
-                if (BPacketBuffer.Count > 0) {
-                    var a = Random.Next(BPacketBuffer.Count);
-                    var act = Random.Next(2);
-                    if (act == 0) {
-                        var buffer = BPacketBuffer[a];
-                        BChannel.ReceivePacket(buffer, 0, buffer.Length);
-                    }
-                    else
-                        BPacketBuffer.RemoveAt(a);
-                }
-
                 if (BPacketBuffer.Count > 1000) {
                     BPacketBuffer.Clear();
                 }
+                while ((APacketBuffer.Count > 0) || (BPacketBuffer.Count > 0)) {
+                    if (APacketBuffer.Count > 0) {
+                        var a = Random.Next(Math.Min(16, APacketBuffer.Count));
+                        var act = Random.Next(2);
+                        if (act == 0) {
+                            var buffer = APacketBuffer[a];
+                            AChannel.ReceivePacket(new(buffer, 0, buffer.Length));
+                        }
+                        else
+                            APacketBuffer.RemoveAt(a);
+                    }
+
+                    if (BPacketBuffer.Count > 0) {
+                        var a = Random.Next(Math.Min(16, BPacketBuffer.Count));
+                        var act = Random.Next(2);
+                        if (act == 0) {
+                            var buffer = BPacketBuffer[a];
+                            BChannel.ReceivePacket(new(buffer, 0, buffer.Length));
+                        }
+                        else
+                            BPacketBuffer.RemoveAt(a);
+                    }
+                }
+
             }
 
 
@@ -83,55 +87,44 @@ namespace Plukit.ReliableEndpoint {
             }
 
             if (ac != 1024 * 1024)
-                throw new Exception();
+                throw new Exception("" + ac);
             if (bc != 1024 * 1024)
-                throw new Exception();
+                throw new Exception("" + bc);
         }
 
-        static void ReceiveMessageB(byte[] buffer, int offset, int length) {
-            var b = new byte[length];
-            for (var i = 0; i < length; ++i)
-                b[i] = buffer[offset + i];
-            BReceived.Add(b);
+        static void ReceiveMessageB(Memory<byte> buffer) {
+            BReceived.Add(buffer.ToArray());
         }
 
-        static void ReceiveMessageA(byte[] buffer, int offset, int length) {
-            var b = new byte[length];
-            for (var i = 0; i < length; ++i)
-                b[i] = buffer[offset + i];
-            AReceived.Add(b);
+        static void ReceiveMessageA(Memory<byte> buffer) {
+            AReceived.Add(buffer.ToArray());
         }
 
-        static bool TransmitPacketB(byte[] buffer, int length) {
-            var b = new byte[length];
-            for (var i = 0; i < length; ++i)
-                b[i] = buffer[i];
-            APacketBuffer.Add(b);
+        static bool TransmitPacketB(Memory<byte> buffer) {
+            APacketBuffer.Add(buffer.ToArray());
             return true;
         }
 
-        static bool TransmitPacketA(byte[] buffer, int length) {
-            var b = new byte[length];
-            for (var i = 0; i < length; ++i)
-                b[i] = buffer[i];
-            BPacketBuffer.Add(b);
+        static bool TransmitPacketA(Memory<byte> buffer) {
+            BPacketBuffer.Add(buffer.ToArray());
             return true;
         }
 
-        static void Release(byte[] obj) {
-            for (var i = 0; i < obj.Length; ++i)
-                obj[i] = 0xff;
+        static void Release(PacketBuffer obj) {
+            var span = obj.Memory.Span;
+            for (var i = 0; i < span.Length; ++i)
+                span[i] = 0xff;
         }
 
-        static byte[] Allocator(int length) {
-            return new byte[length];
+        static PacketBuffer Allocator(int length) {
+            return new() { Handle = 1, Memory = new(new byte[length]) };
         }
 
         public static Random Random = new Random();
         public static Channel AChannel;
         public static Channel BChannel;
-        public static List<byte[]> AReceived = new List<byte[]>();
-        public static List<byte[]> BReceived = new List<byte[]>();
+        public static List<byte[]> AReceived = new();
+        public static List<byte[]> BReceived = new();
         public static List<byte[]> APacketBuffer = new List<byte[]>();
         public static List<byte[]> BPacketBuffer = new List<byte[]>();
     }
