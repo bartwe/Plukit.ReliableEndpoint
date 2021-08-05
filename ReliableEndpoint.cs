@@ -20,10 +20,8 @@ namespace Plukit.ReliableEndpoint {
      * call ReceivePacket with the raw packet data received from the network
      * 
      * 
-     * buffer.Length should not be used on these buffers, the value is not useful
-     * 
-     * transmitPacketCallback(byte[] buffer, int length) -> bool (channel congested/closed)
-     * receiveMessageCallback(byte[] buffer, int offset, int length)
+     * transmitPacketCallback(Memory<byte>) -> bool (channel congested/closed)
+     * receiveMessageCallback(Memory<byte>)
      * 
      * 
      */
@@ -70,11 +68,11 @@ namespace Plukit.ReliableEndpoint {
         int _sendWindowStart;
         int _sendWindowHighestAck;
 
-        readonly List<Packet> _sendWindow = new List<Packet>();
+        readonly List<Packet> _sendWindow = new();
 
 
         int _receiveWindowStart;
-        readonly List<Packet> _receiveWindow = new List<Packet>();
+        readonly List<Packet> _receiveWindow = new();
 
         readonly Stopwatch _timer = Stopwatch.StartNew();
 
@@ -97,7 +95,7 @@ namespace Plukit.ReliableEndpoint {
 
         bool _packetReceived;
 
-        readonly List<int> _resendables = new List<int>();
+        readonly List<int> _resendables = new();
 
         public bool Congested => _congested;
         public bool Timeout => _idleTimeout && !_disconnecting;
