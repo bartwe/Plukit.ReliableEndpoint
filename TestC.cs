@@ -19,77 +19,80 @@ namespace Plukit.ReliableEndpoint {
                 BChannel.SendMessage(new(b, 0, 1));
             }
 
-            for (var i = 0; i < 100; ++i) {
-                AChannel.Update();
-                BChannel.Update();
+            for (var c = 0; ; ++c) {
 
-                //    Thread.Sleep(1);
+                for (var i = 0; i < 20; ++i) {
+                    AChannel.Update();
+                    BChannel.Update();
 
-
-                var bias = Random.Next(1000);
-                AChannel.DebugElapsedTimeBias += bias;
-                BChannel.DebugElapsedTimeBias += bias;
+                    //    Thread.Sleep(1);
 
 
-                if (APacketBuffer.Count > 1000) {
-                    APacketBuffer.Clear();
-                }
-                if (BPacketBuffer.Count > 1000) {
-                    BPacketBuffer.Clear();
-                }
-                while ((APacketBuffer.Count > 0) || (BPacketBuffer.Count > 0)) {
-                    if (APacketBuffer.Count > 0) {
-                        var a = Random.Next(Math.Min(16, APacketBuffer.Count));
-                        var act = Random.Next(2);
-                        if (act == 0) {
-                            var buffer = APacketBuffer[a];
-                            AChannel.ReceivePacket(new(buffer, 0, buffer.Length));
-                        }
-                        else
-                            APacketBuffer.RemoveAt(a);
+                    var bias = Random.Next(1000);
+                    AChannel.DebugElapsedTimeBias += bias;
+                    BChannel.DebugElapsedTimeBias += bias;
+
+
+                    if (APacketBuffer.Count > 1000) {
+                        APacketBuffer.Clear();
                     }
-
-                    if (BPacketBuffer.Count > 0) {
-                        var a = Random.Next(Math.Min(16, BPacketBuffer.Count));
-                        var act = Random.Next(2);
-                        if (act == 0) {
-                            var buffer = BPacketBuffer[a];
-                            BChannel.ReceivePacket(new(buffer, 0, buffer.Length));
+                    if (BPacketBuffer.Count > 1000) {
+                        BPacketBuffer.Clear();
+                    }
+                    while ((APacketBuffer.Count > 0) || (BPacketBuffer.Count > 0)) {
+                        if (APacketBuffer.Count > 0) {
+                            var a = Random.Next(Math.Min(16, APacketBuffer.Count));
+                            var act = Random.Next(2);
+                            if (act == 0) {
+                                var buffer = APacketBuffer[a];
+                                AChannel.ReceivePacket(new(buffer, 0, buffer.Length));
+                            }
+                            else
+                                APacketBuffer.RemoveAt(a);
                         }
-                        else
-                            BPacketBuffer.RemoveAt(a);
+
+                        if (BPacketBuffer.Count > 0) {
+                            var a = Random.Next(Math.Min(16, BPacketBuffer.Count));
+                            var act = Random.Next(2);
+                            if (act == 0) {
+                                var buffer = BPacketBuffer[a];
+                                BChannel.ReceivePacket(new(buffer, 0, buffer.Length));
+                            }
+                            else
+                                BPacketBuffer.RemoveAt(a);
+                        }
                     }
                 }
 
-            }
-
-
-            var ac = 0;
-            foreach (var a in AReceived) {
-                for (var i = 0; i < a.Length; ++i) {
-                    var x = ac + i;
-                    var y = (byte)(x & 0x7f | 0x80);
-                    if (a[i] != y)
-                        throw new Exception();
+                var ac = 0;
+                foreach (var a in AReceived) {
+                    for (var i = 0; i < a.Length; ++i) {
+                        var x = ac + i;
+                        var y = (byte)(x & 0x7f | 0x80);
+                        if (a[i] != y)
+                            throw new Exception();
+                    }
+                    ac += a.Length;
                 }
-                ac += a.Length;
-            }
 
-            var bc = 0;
-            foreach (var b in BReceived) {
-                for (var i = 0; i < b.Length; ++i) {
-                    var x = bc + i;
-                    var y = (byte)(x & 0x7f);
-                    if (b[i] != y)
-                        throw new Exception();
+                var bc = 0;
+                foreach (var b in BReceived) {
+                    for (var i = 0; i < b.Length; ++i) {
+                        var x = bc + i;
+                        var y = (byte)(x & 0x7f);
+                        if (b[i] != y)
+                            throw new Exception();
+                    }
+                    bc += b.Length;
                 }
-                bc += b.Length;
-            }
 
-            if (ac != 1024 * 1024)
-                throw new Exception("" + ac);
-            if (bc != 1024 * 1024)
-                throw new Exception("" + bc);
+                if ((ac == 1024 * 1024) && (bc == 1024 * 1024))
+                    break;
+
+                if (c == 50) {
+                    throw new Exception("Not all data was sent/received " + ac + " " + bc);
+                }
+            }
         }
 
         static void ReceiveMessageB(Memory<byte> buffer) {
