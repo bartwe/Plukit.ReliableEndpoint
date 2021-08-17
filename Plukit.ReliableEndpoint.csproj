@@ -17,6 +17,7 @@
     <OutputPath>bin\$(Configuration)</OutputPath>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Platforms>AnyCPU</Platforms>
+    <WarningsAsErrors>;NU1605;8602;8625;8600;8604;8618</WarningsAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugWindowsX64|AnyCPU'">
