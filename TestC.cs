@@ -1,26 +1,33 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
-using System.Threading;
 
 namespace Plukit.ReliableEndpoint {
-    public class TestC {
+    public sealed class TestC {
+        public static Random Random = new();
+        public static Channel AChannel;
+        public static Channel BChannel;
+        public static List<byte[]> AReceived = new();
+        public static List<byte[]> BReceived = new();
+        public static List<byte[]> APacketBuffer = new();
+
+        public static List<byte[]> BPacketBuffer = new();
+
         // out of order/duplicate/dropped delivery
         public static void Run() {
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
+            AChannel = new(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
+            BChannel = new(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
 
 
-            for (var i = 0; i < 1024 * 1024; ++i) {
+            for (var i = 0; i < (1024 * 1024); ++i) {
                 var b = new byte[1];
                 b[0] = (byte)(i & 0x7f);
                 AChannel.SendMessage(new(b, 0, 1));
-                b[0] = (byte)(i & 0x7f | 0x80);
+                b[0] = (byte)((i & 0x7f) | 0x80);
                 BChannel.SendMessage(new(b, 0, 1));
             }
 
-            for (var c = 0; ; ++c) {
-
+            for (var c = 0;; ++c) {
                 for (var i = 0; i < 20; ++i) {
                     AChannel.Update();
                     BChannel.Update();
@@ -68,9 +75,9 @@ namespace Plukit.ReliableEndpoint {
                 foreach (var a in AReceived) {
                     for (var i = 0; i < a.Length; ++i) {
                         var x = ac + i;
-                        var y = (byte)(x & 0x7f | 0x80);
+                        var y = (byte)((x & 0x7f) | 0x80);
                         if (a[i] != y)
-                            throw new Exception();
+                            throw new();
                     }
                     ac += a.Length;
                 }
@@ -81,16 +88,16 @@ namespace Plukit.ReliableEndpoint {
                         var x = bc + i;
                         var y = (byte)(x & 0x7f);
                         if (b[i] != y)
-                            throw new Exception();
+                            throw new();
                     }
                     bc += b.Length;
                 }
 
-                if ((ac == 1024 * 1024) && (bc == 1024 * 1024))
+                if ((ac == (1024 * 1024)) && (bc == (1024 * 1024)))
                     break;
 
                 if (c == 50) {
-                    throw new Exception("Not all data was sent/received " + ac + " " + bc);
+                    throw new("Not all data was sent/received " + ac + " " + bc);
                 }
             }
         }
@@ -122,13 +129,5 @@ namespace Plukit.ReliableEndpoint {
         static PacketBuffer Allocator(int length) {
             return new() { Handle = 1, Memory = new(new byte[length]) };
         }
-
-        public static Random Random = new Random();
-        public static Channel AChannel;
-        public static Channel BChannel;
-        public static List<byte[]> AReceived = new();
-        public static List<byte[]> BReceived = new();
-        public static List<byte[]> APacketBuffer = new List<byte[]>();
-        public static List<byte[]> BPacketBuffer = new List<byte[]>();
     }
 }

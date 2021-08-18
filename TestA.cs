@@ -3,19 +3,25 @@ using System;
 using System.Collections.Generic;
 
 namespace Plukit.ReliableEndpoint {
-    public class TestA {
+    public sealed class TestA {
+        public static Channel AChannel;
+        public static Channel BChannel;
+        public static List<byte[]> AReceived = new();
+
+        public static List<byte[]> BReceived = new();
+
         // identity test, no unreliability at all
         public static void Run() {
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
+            AChannel = new(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
+            BChannel = new(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
 
 
-            for (var i = 0; i < 1024 * 1024; ++i) {
+            for (var i = 0; i < (1024 * 1024); ++i) {
                 var b = new byte[1];
                 b[0] = (byte)(i & 0x7f);
                 AChannel.SendMessage(new(b, 0, 1));
-                b[0] = (byte)(i & 0x7f | 0x80);
-                BChannel.SendMessage(new (b, 0, 1));
+                b[0] = (byte)((i & 0x7f) | 0x80);
+                BChannel.SendMessage(new(b, 0, 1));
             }
 
             for (var i = 0; i < 1000; ++i) {
@@ -28,9 +34,9 @@ namespace Plukit.ReliableEndpoint {
             foreach (var a in AReceived) {
                 for (var i = 0; i < a.Length; ++i) {
                     var x = ac + i;
-                    var y = (byte)(x & 0x7f | 0x80);
+                    var y = (byte)((x & 0x7f) | 0x80);
                     if (a[i] != y)
-                        throw new Exception();
+                        throw new();
                 }
                 ac += a.Length;
             }
@@ -41,15 +47,15 @@ namespace Plukit.ReliableEndpoint {
                     var x = bc + i;
                     var y = (byte)(x & 0x7f);
                     if (b[i] != y)
-                        throw new Exception();
+                        throw new();
                 }
                 bc += b.Length;
             }
 
-            if (ac != 1024 * 1024)
-                throw new Exception();
-            if (bc != 1024 * 1024)
-                throw new Exception();
+            if (ac != (1024 * 1024))
+                throw new();
+            if (bc != (1024 * 1024))
+                throw new();
         }
 
         static void ReceiveMessageB(Memory<byte> buffer) {
@@ -79,10 +85,5 @@ namespace Plukit.ReliableEndpoint {
         static PacketBuffer Allocator(int length) {
             return new() { Handle = 1, Memory = new(new byte[length]) };
         }
-
-        public static Channel AChannel;
-        public static Channel BChannel;
-        public static List<byte[]> AReceived = new();
-        public static List<byte[]> BReceived = new();
     }
 }

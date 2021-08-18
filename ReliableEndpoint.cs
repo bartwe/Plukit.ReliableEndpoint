@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 
@@ -31,13 +30,7 @@ namespace Plukit.ReliableEndpoint {
         public int Handle;
     }
 
-    public class Channel {
-        readonly Func<Memory<byte>, bool> _transmitPacketCallback;
-        readonly Action<Memory<byte>> _receiveMessageCallback;
-
-        readonly Func<int, PacketBuffer> _allocate;
-        readonly Action<PacketBuffer> _release;
-
+    public sealed class Channel {
         const int WindowAckSize = 256;
         const int WindowAckBytesSize = WindowAckSize / 8;
         const int OuterPacketSize = 1100;
@@ -59,6 +52,11 @@ namespace Plukit.ReliableEndpoint {
         const int DisconnectLoopsTimeoutRatio = 10;
 
         const int ReSendAckOldestEveryNth = 5;
+        readonly Func<Memory<byte>, bool> _transmitPacketCallback;
+        readonly Action<Memory<byte>> _receiveMessageCallback;
+
+        readonly Func<int, PacketBuffer> _allocate;
+        readonly Action<PacketBuffer> _release;
 
         bool _disposed;
 
@@ -77,7 +75,6 @@ namespace Plukit.ReliableEndpoint {
         readonly Stopwatch _timer = Stopwatch.StartNew();
 
         int _sendSequenceId;
-        bool _congested;
         int _unackedDataSize;
 
         bool _ackRequested;
@@ -87,7 +84,6 @@ namespace Plukit.ReliableEndpoint {
 
         long _lastReceived;
         bool _idleTimeout;
-        bool _failure;
 
         readonly uint _localSignature;
         uint _remoteSignature;
@@ -96,12 +92,6 @@ namespace Plukit.ReliableEndpoint {
         bool _packetReceived;
 
         readonly List<int> _resendables = new();
-
-        public bool Congested => _congested;
-        public bool Timeout => _idleTimeout && !_disconnecting;
-        public bool Failure => _failure;
-        public bool Disconnected => _failure || _idleTimeout;
-        public bool Disconnecting => Disconnected || _disconnecting;
         public long DebugElapsedTimeBias;
         bool _disconnecting;
         int _disconnectedLoops;
@@ -121,10 +111,10 @@ namespace Plukit.ReliableEndpoint {
             _transmitPacketCallback = transmitPacketCallback;
             _receiveMessageCallback = receiveMessageCallback;
             var guid = Guid.NewGuid().ToByteArray();
-            var stamp = (guid[0]) ^ (guid[1] << 8) ^ (guid[2] << 16) ^ (guid[3] << 24)
-                        ^ (guid[4]) ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
-                        ^ (guid[8]) ^ (guid[9] << 8) ^ (guid[10] << 16) ^ (guid[11] << 24)
-                        ^ (guid[12]) ^ (guid[13] << 8) ^ (guid[14] << 16) ^ (guid[15] << 24);
+            var stamp = guid[0] ^ (guid[1] << 8) ^ (guid[2] << 16) ^ (guid[3] << 24)
+                ^ guid[4] ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
+                ^ guid[8] ^ (guid[9] << 8) ^ (guid[10] << 16) ^ (guid[11] << 24)
+                ^ guid[12] ^ (guid[13] << 8) ^ (guid[14] << 16) ^ (guid[15] << 24);
             //signature lsb encodes if the connection is server or clientsided, remote side must use a signature with the lowest bit flipped
             var signature = ((uint)(stamp & 0x7fffffff) << 1) | (serverSide ? 1u : 0u);
 
@@ -132,11 +122,27 @@ namespace Plukit.ReliableEndpoint {
             _localSignature = signature;
         }
 
+        public bool Congested { get; private set; }
+
+        public bool Timeout {
+            get { return _idleTimeout && !_disconnecting; }
+        }
+
+        public bool Failure { get; private set; }
+
+        public bool Disconnected {
+            get { return Failure || _idleTimeout; }
+        }
+
+        public bool Disconnecting {
+            get { return Disconnected || _disconnecting; }
+        }
+
         public void Dispose() {
             if (_disposed)
                 throw new ObjectDisposedException(GetType().Name);
             _disposed = true;
-            _failure = true;
+            Failure = true;
 
             _resendables.Clear();
 
@@ -156,7 +162,7 @@ namespace Plukit.ReliableEndpoint {
                 return;
 
             FlushMessageBuffer();
-            _congested = false;
+            Congested = false;
             var now = _timer.ElapsedMilliseconds + DebugElapsedTimeBias;
             var packetSent = false;
             if (!Disconnecting) {
@@ -170,7 +176,7 @@ namespace Plukit.ReliableEndpoint {
                         if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
                             WriteAckheader(packet.Buffer.Memory.Span);
                             if (!_transmitPacketCallback(packet.Buffer.Memory.Slice(0, packet.Length))) {
-                                _congested = true;
+                                Congested = true;
                                 break;
                             }
                             packetSent = true;
@@ -192,7 +198,7 @@ namespace Plukit.ReliableEndpoint {
             if (_idleAckStandOff > MaxAckStandOff)
                 _idleAckStandOff = MaxAckStandOff;
 
-            var ackTS = _idleAckTS + ((_idleAckStandOff == 0) ? 0 : (AckResendStandOff << (_idleAckStandOff - 1)));
+            var ackTS = _idleAckTS + (_idleAckStandOff == 0 ? 0 : AckResendStandOff << (_idleAckStandOff - 1));
 
             if (_ackRequested || packetSent || _packetReceived) {
                 // request ack to be send immediately next time
@@ -223,10 +229,10 @@ namespace Plukit.ReliableEndpoint {
                     var messageSize = HeaderSize;
                     if (Disconnecting) {
                         buffer[messageSize++] = 99; // 'c' close
-                        buffer[messageSize++] = (byte)((_disconnectedLoops > 255) ? 255 : _disconnectedLoops);
+                        buffer[messageSize++] = (byte)(_disconnectedLoops > 255 ? 255 : _disconnectedLoops);
                     }
                     if (!_transmitPacketCallback(packet.Memory.Slice(0, messageSize)))
-                        _congested = true;
+                        Congested = true;
                     else {
                         _idleAckTS = now;
 
@@ -237,8 +243,8 @@ namespace Plukit.ReliableEndpoint {
                 else {
                     var packet = _sendWindow[oldestMissingPacket];
                     WriteAckheader(packet.Buffer.Memory.Span);
-                    if (!_transmitPacketCallback(packet.Buffer.Memory.Slice(0 , packet.Length))) {
-                        _congested = true;
+                    if (!_transmitPacketCallback(packet.Buffer.Memory.Slice(0, packet.Length))) {
+                        Congested = true;
                     }
                     else {
                         packet.SendCount++;
@@ -255,9 +261,9 @@ namespace Plukit.ReliableEndpoint {
                 if (_disconnectedLoops >= DisconnectLoopsTimeoutRatio)
                     idleTimeout = 0;
                 else
-                    idleTimeout = DisconnectTimeout * (DisconnectLoopsTimeoutRatio - _disconnectedLoops) / DisconnectLoopsTimeoutRatio;
+                    idleTimeout = (DisconnectTimeout * (DisconnectLoopsTimeoutRatio - _disconnectedLoops)) / DisconnectLoopsTimeoutRatio;
             }
-            _idleTimeout = (now - _lastReceived > idleTimeout);
+            _idleTimeout = (now - _lastReceived) > idleTimeout;
             if (_idleTimeout) {
                 //Console.WriteLine("_idleTimeout: " + _idleTimeout + " rw: " + _receiveWindow.Count + " sw: " + _sendWindow.Count + " now: " + now + " _lastReceived: " + _lastReceived+" _disconnected: "+_disconnected);
             }
@@ -272,21 +278,21 @@ namespace Plukit.ReliableEndpoint {
             for (var i = 0; i < WindowAckBytesSize; ++i) {
                 byte mask = 0;
 
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 0))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 0))
                     mask |= 0x01;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 1))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 1))
                     mask |= 0x02;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 2))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 2))
                     mask |= 0x04;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 3))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 3))
                     mask |= 0x08;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 4))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 4))
                     mask |= 0x10;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 5))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 5))
                     mask |= 0x20;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 6))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 6))
                     mask |= 0x40;
-                if (CanAckReceived(_receiveWindowStart + i * 8 + 7))
+                if (CanAckReceived(_receiveWindowStart + (i * 8) + 7))
                     mask |= 0x80;
 
                 buffer[12 + i] = mask;
@@ -295,7 +301,7 @@ namespace Plukit.ReliableEndpoint {
 
         bool CanAckReceived(int sequence) {
             if (sequence < _receiveWindowStart)
-                throw new Exception("Sequence from before window start " + sequence + " " + _receiveWindowStart);
+                throw new("Sequence from before window start " + sequence + " " + _receiveWindowStart);
             var idx = sequence - _receiveWindowStart;
             if (idx >= _receiveWindow.Count)
                 return false;
@@ -304,15 +310,15 @@ namespace Plukit.ReliableEndpoint {
 
         void CheckCongested() {
             if (_sendWindow.Count > SendWindowFull)
-                _congested = true;
+                Congested = true;
             if (_unackedDataSize > UnackedDataLimit)
-                _congested = true;
+                Congested = true;
         }
 
         long CalcSendMoment(Packet packet, bool beyondAckHead) {
             if (packet.SendCount == 0)
                 return 0;
-            return packet.CreatedTS + (beyondAckHead ? InitialResendDelay : MissedResendDelay) + ResendStandOff << (packet.SendCount - 1);
+            return (packet.CreatedTS + (beyondAckHead ? InitialResendDelay : MissedResendDelay) + ResendStandOff) << (packet.SendCount - 1);
         }
 
         // can take an arbitrarily sized message
@@ -362,7 +368,7 @@ namespace Plukit.ReliableEndpoint {
             buffer[1] = (byte)((_localSignature >> 8) & 0xff);
             buffer[2] = (byte)((_localSignature >> 16) & 0xff);
             buffer[3] = (byte)((_localSignature >> 24) & 0xff);
-            
+
             buffer[4] = (byte)(packet.SequenceId & 0xff);
             buffer[5] = (byte)((packet.SequenceId >> 8) & 0xff);
             buffer[6] = (byte)((packet.SequenceId >> 16) & 0xff);
@@ -384,7 +390,7 @@ namespace Plukit.ReliableEndpoint {
             if (_disposed)
                 throw new ObjectDisposedException(GetType().Name);
 
-            var remoteSignature = (packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24));
+            var remoteSignature = packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24);
             var sequenceId = packet[4] | (packet[5] << 8) | (packet[6] << 16) | (packet[7] << 24);
             var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
 
@@ -414,7 +420,7 @@ namespace Plukit.ReliableEndpoint {
             var length = packet.Length;
 
             if (length < HeaderSize)
-                throw new Exception("Packet too short. length: " + length);
+                throw new("Packet too short. length: " + length);
 
             AckUpto(sendAckWindowhead);
             for (var i = 0; i < WindowAckBytesSize; ++i) {
@@ -422,21 +428,21 @@ namespace Plukit.ReliableEndpoint {
                 if (ack == 0)
                     continue;
                 if ((ack & 0x01) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 0);
+                    Ack(sendAckWindowhead + (i * 8) + 0);
                 if ((ack & 0x02) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 1);
+                    Ack(sendAckWindowhead + (i * 8) + 1);
                 if ((ack & 0x04) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 2);
+                    Ack(sendAckWindowhead + (i * 8) + 2);
                 if ((ack & 0x08) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 3);
+                    Ack(sendAckWindowhead + (i * 8) + 3);
                 if ((ack & 0x10) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 4);
+                    Ack(sendAckWindowhead + (i * 8) + 4);
                 if ((ack & 0x20) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 5);
+                    Ack(sendAckWindowhead + (i * 8) + 5);
                 if ((ack & 0x40) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 6);
+                    Ack(sendAckWindowhead + (i * 8) + 6);
                 if ((ack & 0x80) != 0)
-                    Ack(sendAckWindowhead + i * 8 + 7);
+                    Ack(sendAckWindowhead + (i * 8) + 7);
             }
             if (sequenceId != -1) {
                 if (sequenceId >= _receiveWindowStart) {
@@ -448,12 +454,12 @@ namespace Plukit.ReliableEndpoint {
                     }
                     var rp = _receiveWindow[ri];
                     if (rp.SequenceId != sequenceId)
-                        throw new Exception("SequnceId mismatch " + rp.SequenceId + " " + sequenceId);
+                        throw new("SequnceId mismatch " + rp.SequenceId + " " + sequenceId);
                     if (rp.Buffer.Memory.IsEmpty) {
                         rp.Buffer = _allocate(length);
                         rp.Length = length;
                         if (rp.Buffer.Memory.Length < length)
-                            throw new Exception("Incorrect length " + rp.Buffer.Memory.Length + " " + length);
+                            throw new("Incorrect length " + rp.Buffer.Memory.Length + " " + length);
                         packet.CopyTo(rp.Buffer.Memory.Slice(0, length).Span);
                         _receiveWindow[ri] = rp;
                     }
@@ -478,9 +484,9 @@ namespace Plukit.ReliableEndpoint {
                             commandOffset++;
                             continue;
                         default:
-                            throw new Exception("Packet with unknown meta command: " + packet[HeaderSize + 0]);
+                            throw new("Packet with unknown meta command: " + packet[HeaderSize + 0]);
                     }
-                    throw new Exception("Meta command incorrect length " + length + " " + HeaderSize + " " + commandOffset);
+                    throw new("Meta command incorrect length " + length + " " + HeaderSize + " " + commandOffset);
                 }
             }
             _ackRequested = true;
@@ -520,7 +526,7 @@ namespace Plukit.ReliableEndpoint {
             var i = idx - _sendWindowStart;
             if (i >= _sendWindow.Count) {
                 //Console.WriteLine("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
-                _failure = true;
+                Failure = true;
                 return;
             }
             var packet = _sendWindow[i];
@@ -547,9 +553,9 @@ namespace Plukit.ReliableEndpoint {
 
         void AckUpto(int idx) {
             // upto, but not including idx
-            if (idx > _sendWindowStart + _sendWindow.Count) {
+            if (idx > (_sendWindowStart + _sendWindow.Count)) {
                 //Console.WriteLine("ack for unsent packet:" + idx + " send window:" + _sendWindowStart + ".." + (_sendWindowStart + _sendWindow.Count));
-                _failure = true;
+                Failure = true;
                 return;
             }
             while (_sendWindowStart < idx) {

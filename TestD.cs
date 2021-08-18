@@ -5,12 +5,25 @@ using System.Diagnostics;
 using System.Threading;
 
 namespace Plukit.ReliableEndpoint {
-    public class TestD {
+    public sealed class TestD {
+        public static Random Random;
+        public static Stopwatch Stopwatch;
+        public static Channel AChannel;
+        public static Channel BChannel;
+        public static List<byte[]> AReceived;
+        public static List<byte[]> BReceived;
+        public static Queue<KeyValuePair<long, byte[]>> APacketBuffer;
+        public static Queue<KeyValuePair<long, byte[]>> BPacketBuffer;
+
+        public static int LineLagMin;
+
+        public static int LineLagMax;
+
         // Speed at different packetloss percentages
         // packetLossPercentage [0..100]
         public static void Run() {
             Console.WriteLine("Testing performance with packetloss");
-            for (var i = 0; i <= 100; i = i * 2 + 1) {
+            for (var i = 0; i <= 100; i = (i * 2) + 1) {
                 var sw = Stopwatch.StartNew();
                 var loopCount = Run(i);
                 Console.WriteLine(i + "% loss. duration(ms) " + sw.ElapsedMilliseconds + " packets:" + loopCount);
@@ -21,15 +34,15 @@ namespace Plukit.ReliableEndpoint {
             var result = 0;
             var sendBytes = 1024 * 10240;
 
-            Random = new Random(0);
+            Random = new(0);
 
-            AReceived = new List<byte[]>();
-            BReceived = new List<byte[]>();
-            APacketBuffer = new Queue<KeyValuePair<long, byte[]>>();
-            BPacketBuffer = new Queue<KeyValuePair<long, byte[]>>();
+            AReceived = new();
+            BReceived = new();
+            APacketBuffer = new();
+            BPacketBuffer = new();
 
-            AChannel = new Channel(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
-            BChannel = new Channel(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
+            AChannel = new(true, Allocator, Release, TransmitPacketA, ReceiveMessageA);
+            BChannel = new(false, Allocator, Release, TransmitPacketB, ReceiveMessageB);
 
             LineLagMin = 300;
             LineLagMax = 400;
@@ -38,16 +51,15 @@ namespace Plukit.ReliableEndpoint {
 
             var bytesPerMillisecond = 1000;
 
-            int sent = 0;
-            int lc = 0;
+            var sent = 0;
+            var lc = 0;
 
             while (Stopwatch.ElapsedMilliseconds < 200) {
-
-                for (; sent < sendBytes && sent < bytesPerMillisecond * Stopwatch.ElapsedMilliseconds; ++sent) {
+                for (; (sent < sendBytes) && (sent < (bytesPerMillisecond * Stopwatch.ElapsedMilliseconds)); ++sent) {
                     var b = new byte[1];
                     b[0] = (byte)(sent & 0x7f);
                     AChannel.SendMessage(new(b, 0, 1));
-                    b[0] = (byte)(sent & 0x7f | 0x80);
+                    b[0] = (byte)((sent & 0x7f) | 0x80);
                     BChannel.SendMessage(new(b, 0, 1));
                 }
 
@@ -66,7 +78,7 @@ namespace Plukit.ReliableEndpoint {
                 BChannel.DebugElapsedTimeBias += bias;
                 */
 
-                int c = 0;
+                var c = 0;
                 while (APacketBuffer.Count > 0) {
                     if (APacketBuffer.Peek().Key > Stopwatch.ElapsedMilliseconds)
                         break;
@@ -148,12 +160,12 @@ namespace Plukit.ReliableEndpoint {
         }
 
         static bool TransmitPacketB(Memory<byte> buffer) {
-            APacketBuffer.Enqueue(new KeyValuePair<long, byte[]>(Stopwatch.ElapsedMilliseconds + Random.Next(LineLagMin, LineLagMax), buffer.ToArray()));
+            APacketBuffer.Enqueue(new(Stopwatch.ElapsedMilliseconds + Random.Next(LineLagMin, LineLagMax), buffer.ToArray()));
             return true;
         }
 
         static bool TransmitPacketA(Memory<byte> buffer) {
-            BPacketBuffer.Enqueue(new KeyValuePair<long, byte[]>(Stopwatch.ElapsedMilliseconds + Random.Next(LineLagMin, LineLagMax), buffer.ToArray()));
+            BPacketBuffer.Enqueue(new(Stopwatch.ElapsedMilliseconds + Random.Next(LineLagMin, LineLagMax), buffer.ToArray()));
             return true;
         }
 
@@ -166,17 +178,5 @@ namespace Plukit.ReliableEndpoint {
         static PacketBuffer Allocator(int length) {
             return new() { Handle = 1, Memory = new(new byte[length]) };
         }
-
-        public static Random Random;
-        public static Stopwatch Stopwatch;
-        public static Channel AChannel;
-        public static Channel BChannel;
-        public static List<byte[]> AReceived;
-        public static List<byte[]> BReceived;
-        public static Queue<KeyValuePair<long, byte[]>> APacketBuffer;
-        public static Queue<KeyValuePair<long, byte[]>> BPacketBuffer;
-
-        public static int LineLagMin;
-        public static int LineLagMax;
     }
 }
