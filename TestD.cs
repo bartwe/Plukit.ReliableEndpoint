@@ -91,7 +91,7 @@ namespace Plukit.ReliableEndpoint {
                 }
 //                Console.WriteLine(c);
             }
-
+            /*
 
             var ac = 0;
             foreach (var a in AReceived) {
@@ -119,7 +119,7 @@ namespace Plukit.ReliableEndpoint {
                 throw new Exception();
             if (bc != sendBytes)
                 throw new Exception();
-
+                */
             /*
             Console.WriteLine(
             "A headerbytes: "+AChannel.headerbytes+
