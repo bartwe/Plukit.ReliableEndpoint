@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
-namespace Plukit.ReliableEndpoint;
+namespace Plukit.ReliableEndpoint.Tests;
 
 public sealed class TestD {
     public static Random Random;

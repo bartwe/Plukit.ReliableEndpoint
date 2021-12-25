@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Plukit.ReliableEndpoint;
+namespace Plukit.ReliableEndpoint.Tests;
 
 public sealed class TestB {
     public static Channel AChannel;

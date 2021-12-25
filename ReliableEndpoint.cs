@@ -98,10 +98,10 @@ public sealed class Channel {
     int _disconnectedLoops;
 
     public Channel(bool serverSide, Func<int, PacketBuffer> allocate, Action<PacketBuffer> release, Func<Memory<byte>, bool> transmitPacketCallback, Action<Memory<byte>> receiveMessageCallback) {
-        _allocate = allocate ?? throw new ArgumentNullException("allocate");
-        _release = release ?? throw new ArgumentNullException("release");
-        _transmitPacketCallback = transmitPacketCallback ?? throw new ArgumentNullException("transmitPacketCallback");
-        _receiveMessageCallback = receiveMessageCallback ?? throw new ArgumentNullException("receiveMessageCallback");
+        _allocate = allocate ?? throw new ArgumentNullException(nameof(allocate));
+        _release = release ?? throw new ArgumentNullException(nameof(release));
+        _transmitPacketCallback = transmitPacketCallback ?? throw new ArgumentNullException(nameof(transmitPacketCallback));
+        _receiveMessageCallback = receiveMessageCallback ?? throw new ArgumentNullException(nameof(receiveMessageCallback));
         var guid = Guid.NewGuid().ToByteArray();
         var stamp = guid[0] ^ (guid[1] << 8) ^ (guid[2] << 16) ^ (guid[3] << 24)
             ^ guid[4] ^ (guid[5] << 8) ^ (guid[6] << 16) ^ (guid[7] << 24)
@@ -307,7 +307,7 @@ public sealed class Channel {
             Congested = true;
     }
 
-    long CalcSendMoment(Packet packet, bool beyondAckHead) {
+    static long CalcSendMoment(Packet packet, bool beyondAckHead) {
         if (packet.SendCount == 0)
             return 0;
         return (packet.CreatedTS + (beyondAckHead ? InitialResendDelay : MissedResendDelay) + ResendStandOff) << (packet.SendCount - 1);

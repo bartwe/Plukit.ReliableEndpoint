@@ -2,7 +2,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Plukit.ReliableEndpoint;
+namespace Plukit.ReliableEndpoint.Tests;
 
 public sealed class TestC {
     public static Random Random = new();
