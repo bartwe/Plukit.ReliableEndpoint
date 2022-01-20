@@ -116,19 +116,13 @@ public sealed class Channel {
 
     public bool Congested { get; private set; }
 
-    public bool Timeout {
-        get { return _idleTimeout && !_disconnecting; }
-    }
+    public bool Timeout => _idleTimeout && !_disconnecting;
 
     public bool Failure { get; private set; }
 
-    public bool Disconnected {
-        get { return Failure || _idleTimeout; }
-    }
+    public bool Disconnected => Failure || _idleTimeout;
 
-    public bool Disconnecting {
-        get { return Disconnected || _disconnecting; }
-    }
+    public bool Disconnecting => Disconnected || _disconnecting;
 
     public void Dispose() {
         if (_disposed)
