@@ -32,27 +32,27 @@ public struct PacketBuffer {
 }
 
 public sealed class Channel {
-    const int WindowAckSize = 256;
-    const int WindowAckBytesSize = WindowAckSize / 8;
-    const int OuterPacketSize = 1100;
-    const int HeaderSize = 4 + 4 + 4 + WindowAckBytesSize;
+    const int _WindowAckSize = 256;
+    const int _WindowAckBytesSize = _WindowAckSize / 8;
+    const int _OuterPacketSize = 1100;
+    const int _HeaderSize = 4 + 4 + 4 + _WindowAckBytesSize;
 
-    const int InitialResendDelay = 1000;
-    const int MissedResendDelay = 250;
-    const int ResendStandOff = 128;
-    const int AckResendStandOff = 1;
+    const int _InitialResendDelay = 1000;
+    const int _MissedResendDelay = 250;
+    const int _ResendStandOff = 128;
+    const int _AckResendStandOff = 1;
 
-    const int SendWindowFull = 2048;
-    const int UnackedDataLimit = 1024 * 1024;
+    const int _SendWindowFull = 2048;
+    const int _UnackedDataLimit = 1024 * 1024;
 
-    const int MaxStandOff = 6;
-    const int MaxAckStandOff = 6;
+    const int _MaxStandOff = 6;
+    const int _MaxAckStandOff = 6;
 
-    const int IdleTimeout = 20000;
-    const int DisconnectTimeout = 3000;
-    const int DisconnectLoopsTimeoutRatio = 10;
+    const int _IdleTimeout = 20000;
+    const int _DisconnectTimeout = 3000;
+    const int _DisconnectLoopsTimeoutRatio = 10;
 
-    const int ReSendAckOldestEveryNth = 5;
+    const int _ReSendAckOldestEveryNth = 5;
     readonly Func<Memory<byte>, bool> _transmitPacketCallback;
     readonly Action<Memory<byte>> _receiveMessageCallback;
 
@@ -159,7 +159,7 @@ public sealed class Channel {
                 if (!packet.Buffer.Memory.IsEmpty) {
                     var nextSend = CalcSendMoment(packet, (i + _sendWindowStart) > _sendWindowHighestAck);
                     _unackedDataSize += packet.Length;
-                    if (((i < WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
+                    if (((i < _WindowAckSize) || (packet.SendCount == 0)) && (nextSend <= now)) {
                         WriteAckheader(packet.Buffer.Memory.Span);
                         if (!_transmitPacketCallback(packet.Buffer.Memory[..packet.Length])) {
                             Congested = true;
@@ -168,12 +168,12 @@ public sealed class Channel {
                         packetSent = true;
 
                         packet.SendCount++;
-                        if (packet.SendCount > MaxStandOff)
-                            packet.SendCount = MaxStandOff;
+                        if (packet.SendCount > _MaxStandOff)
+                            packet.SendCount = _MaxStandOff;
                         _sendWindow[i] = packet;
                     }
                     else {
-                        if (_resendables.Count < ReSendAckOldestEveryNth)
+                        if (_resendables.Count < _ReSendAckOldestEveryNth)
                             _resendables.Add(i);
                     }
                 }
@@ -181,10 +181,10 @@ public sealed class Channel {
             CheckCongested();
         }
 
-        if (_idleAckStandOff > MaxAckStandOff)
-            _idleAckStandOff = MaxAckStandOff;
+        if (_idleAckStandOff > _MaxAckStandOff)
+            _idleAckStandOff = _MaxAckStandOff;
 
-        var ackTS = _idleAckTS + (_idleAckStandOff == 0 ? 0 : AckResendStandOff << (_idleAckStandOff - 1));
+        var ackTS = _idleAckTS + (_idleAckStandOff == 0 ? 0 : _AckResendStandOff << (_idleAckStandOff - 1));
 
         if (_ackRequested || packetSent || _packetReceived) {
             // request ack to be send immediately next time
@@ -203,7 +203,7 @@ public sealed class Channel {
                 oldestMissingPacket = _resendables[_oldestPacketResendAckIndex];
             var sendMetaPacket = Disconnecting || (oldestMissingPacket == -1);
             if (sendMetaPacket) {
-                var bufferSize = HeaderSize + 2;
+                var bufferSize = _HeaderSize + 2;
                 var packet = _allocate(bufferSize);
                 var buffer = packet.Memory.Span;
                 buffer[0] = (byte)(_localSignature & 0xff);
@@ -212,13 +212,14 @@ public sealed class Channel {
                 buffer[3] = (byte)((_localSignature >> 24) & 0xff);
                 buffer[4] = buffer[5] = buffer[6] = buffer[7] = 255;
                 WriteAckheader(buffer);
-                var messageSize = HeaderSize;
+                var messageSize = _HeaderSize;
                 if (Disconnecting) {
                     buffer[messageSize++] = 99; // 'c' close
                     buffer[messageSize++] = (byte)(_disconnectedLoops > 255 ? 255 : _disconnectedLoops);
                 }
-                if (!_transmitPacketCallback(packet.Memory[..messageSize]))
+                if (!_transmitPacketCallback(packet.Memory[..messageSize])) {
                     Congested = true;
+                }
                 else {
                     _idleAckTS = now;
 
@@ -242,12 +243,12 @@ public sealed class Channel {
             }
         }
 
-        var idleTimeout = IdleTimeout;
+        var idleTimeout = _IdleTimeout;
         if (_disconnecting) {
-            if (_disconnectedLoops >= DisconnectLoopsTimeoutRatio)
+            if (_disconnectedLoops >= _DisconnectLoopsTimeoutRatio)
                 idleTimeout = 0;
             else
-                idleTimeout = DisconnectTimeout * (DisconnectLoopsTimeoutRatio - _disconnectedLoops) / DisconnectLoopsTimeoutRatio;
+                idleTimeout = _DisconnectTimeout * (_DisconnectLoopsTimeoutRatio - _disconnectedLoops) / _DisconnectLoopsTimeoutRatio;
         }
         _idleTimeout = (now - _lastReceived) > idleTimeout;
         if (_idleTimeout) {
@@ -261,7 +262,7 @@ public sealed class Channel {
         buffer[10] = (byte)((_receiveWindowStart >> 16) & 0xff);
         buffer[11] = (byte)((_receiveWindowStart >> 24) & 0xff);
 
-        for (var i = 0; i < WindowAckBytesSize; ++i) {
+        for (var i = 0; i < _WindowAckBytesSize; ++i) {
             byte mask = 0;
 
             if (CanAckReceived(_receiveWindowStart + (i * 8) + 0))
@@ -295,16 +296,16 @@ public sealed class Channel {
     }
 
     void CheckCongested() {
-        if (_sendWindow.Count > SendWindowFull)
+        if (_sendWindow.Count > _SendWindowFull)
             Congested = true;
-        if (_unackedDataSize > UnackedDataLimit)
+        if (_unackedDataSize > _UnackedDataLimit)
             Congested = true;
     }
 
     static long CalcSendMoment(Packet packet, bool beyondAckHead) {
         if (packet.SendCount == 0)
             return 0;
-        return (packet.CreatedTS + (beyondAckHead ? InitialResendDelay : MissedResendDelay) + ResendStandOff) << (packet.SendCount - 1);
+        return (packet.CreatedTS + (beyondAckHead ? _InitialResendDelay : _MissedResendDelay) + _ResendStandOff) << (packet.SendCount - 1);
     }
 
     // can take an arbitrarily sized message
@@ -320,18 +321,18 @@ public sealed class Channel {
 
         while (length > 0) {
             if (_messageBuffer.Memory.IsEmpty) {
-                _messageBuffer = _allocate(OuterPacketSize);
-                _messageBufferOffset = HeaderSize;
+                _messageBuffer = _allocate(_OuterPacketSize);
+                _messageBufferOffset = _HeaderSize;
             }
             var len = length;
-            var remainder = OuterPacketSize - _messageBufferOffset;
+            var remainder = _OuterPacketSize - _messageBufferOffset;
             if (len > remainder)
                 len = remainder;
             message.Slice(offset, len).CopyTo(_messageBuffer.Memory.Slice(_messageBufferOffset, len).Span);
             offset += len;
             _messageBufferOffset += len;
             length -= len;
-            if (_messageBufferOffset == OuterPacketSize)
+            if (_messageBufferOffset == _OuterPacketSize)
                 FlushMessageBuffer();
         }
     }
@@ -339,7 +340,7 @@ public sealed class Channel {
     void FlushMessageBuffer() {
         if (_messageBuffer.Memory.IsEmpty)
             return;
-        if (_messageBufferOffset == HeaderSize)
+        if (_messageBufferOffset == _HeaderSize)
             return;
         Packet packet;
         packet.SequenceId = _sendSequenceId++;
@@ -405,11 +406,11 @@ public sealed class Channel {
 
         var length = packet.Length;
 
-        if (length < HeaderSize)
+        if (length < _HeaderSize)
             throw new("Packet too short. length: " + length);
 
         AckUpto(sendAckWindowhead);
-        for (var i = 0; i < WindowAckBytesSize; ++i) {
+        for (var i = 0; i < _WindowAckBytesSize; ++i) {
             var ack = packet[12 + i];
             if (ack == 0)
                 continue;
@@ -455,7 +456,7 @@ public sealed class Channel {
             }
         }
         else {
-            var commandOffset = HeaderSize;
+            var commandOffset = _HeaderSize;
             while (commandOffset < length) {
                 switch (packet[commandOffset + 0]) {
                     case 99: // 'c' close command
@@ -471,9 +472,9 @@ public sealed class Channel {
                         commandOffset++;
                         continue;
                     default:
-                        throw new("Packet with unknown meta command: " + packet[HeaderSize + 0]);
+                        throw new("Packet with unknown meta command: " + packet[_HeaderSize + 0]);
                 }
-                throw new("Meta command incorrect length " + length + " " + HeaderSize + " " + commandOffset);
+                throw new("Meta command incorrect length " + length + " " + _HeaderSize + " " + commandOffset);
             }
         }
         _ackRequested = true;
@@ -491,7 +492,7 @@ public sealed class Channel {
             if (packet.Buffer.Memory.IsEmpty)
                 break;
             //Console.WriteLine("Received packet sequence:" + packet.SequenceId);
-            _receiveMessageCallback(packet.Buffer.Memory[HeaderSize..packet.Length]);
+            _receiveMessageCallback(packet.Buffer.Memory[_HeaderSize..packet.Length]);
             _release(packet.Buffer);
             packet.Buffer = default;
             _receiveWindow[cleanupCount] = packet;

@@ -55,8 +55,9 @@ public sealed class TestC {
                             var buffer = APacketBuffer[a];
                             AChannel.ReceivePacket(new(buffer, 0, buffer.Length));
                         }
-                        else
+                        else {
                             APacketBuffer.RemoveAt(a);
+                        }
                     }
 
                     if (BPacketBuffer.Count > 0) {
@@ -66,8 +67,9 @@ public sealed class TestC {
                             var buffer = BPacketBuffer[a];
                             BChannel.ReceivePacket(new(buffer, 0, buffer.Length));
                         }
-                        else
+                        else {
                             BPacketBuffer.RemoveAt(a);
+                        }
                     }
                 }
             }
