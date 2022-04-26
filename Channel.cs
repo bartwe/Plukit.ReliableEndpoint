@@ -25,12 +25,7 @@ namespace Plukit.ReliableEndpoint;
  * 
  * 
  */
-
-public struct PacketBuffer {
-    public Memory<byte> Memory;
-    public int Handle;
-}
-
+ 
 public sealed class Channel {
     const int _WindowAckSize = 256;
     const int _WindowAckBytesSize = _WindowAckSize / 8;
