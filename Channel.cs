@@ -25,7 +25,7 @@ namespace Plukit.ReliableEndpoint;
  * 
  * 
  */
- 
+
 public sealed class Channel {
     const int _WindowAckSize = 256;
     const int _WindowAckBytesSize = _WindowAckSize / 8;
@@ -243,7 +243,7 @@ public sealed class Channel {
             if (_disconnectedLoops >= _DisconnectLoopsTimeoutRatio)
                 idleTimeout = 0;
             else
-                idleTimeout = _DisconnectTimeout * (_DisconnectLoopsTimeoutRatio - _disconnectedLoops) / _DisconnectLoopsTimeoutRatio;
+                idleTimeout = (_DisconnectTimeout * (_DisconnectLoopsTimeoutRatio - _disconnectedLoops)) / _DisconnectLoopsTimeoutRatio;
         }
         _idleTimeout = (now - _lastReceived) > idleTimeout;
         if (_idleTimeout) {
@@ -430,9 +430,7 @@ public sealed class Channel {
             if (sequenceId >= _receiveWindowStart) {
                 var ri = sequenceId - _receiveWindowStart;
                 while (ri >= _receiveWindow.Count) {
-                    var p = new Packet {
-                        SequenceId = _receiveWindowStart + _receiveWindow.Count
-                    };
+                    var p = new Packet { SequenceId = _receiveWindowStart + _receiveWindow.Count };
                     _receiveWindow.Add(p);
                 }
                 var rp = _receiveWindow[ri];
