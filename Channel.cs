@@ -127,6 +127,13 @@ public sealed class Channel {
 
         _resendables.Clear();
 
+        if (!_messageBuffer.Memory.IsEmpty) {
+            _release(_messageBuffer);
+            _messageBuffer = default;
+            _messageBufferOffset = 0;
+        }
+
+
         for (var i = 0; i < _sendWindow.Count; ++i)
             _release(_sendWindow[i].Buffer);
         _sendWindow.Clear();
@@ -300,7 +307,8 @@ public sealed class Channel {
     static long CalcSendMoment(Packet packet, bool beyondAckHead) {
         if (packet.SendCount == 0)
             return 0;
-        return (packet.CreatedTS + (beyondAckHead ? _InitialResendDelay : _MissedResendDelay) + _ResendStandOff) << (packet.SendCount - 1);
+        var baseDelay = (beyondAckHead ? _InitialResendDelay : _MissedResendDelay) + _ResendStandOff;
+        return packet.CreatedTS + ((long)baseDelay << (packet.SendCount - 1));
     }
 
     // can take an arbitrarily sized message
@@ -372,6 +380,11 @@ public sealed class Channel {
         if (_disposed)
             throw new ObjectDisposedException(GetType().Name);
 
+        var length = packet.Length;
+
+        if (length < _HeaderSize)
+            throw new("Packet too short. length: " + length);
+
         var remoteSignature = packet[0] | ((uint)packet[1] << 8) | ((uint)packet[2] << 16) | ((uint)packet[3] << 24);
         var sequenceId = packet[4] | (packet[5] << 8) | (packet[6] << 16) | (packet[7] << 24);
         var sendAckWindowhead = packet[8] | (packet[9] << 8) | (packet[10] << 16) | (packet[11] << 24);
@@ -398,11 +411,6 @@ public sealed class Channel {
             //Console.WriteLine("Remote signature mismatch :" + remoteSignature + " expected:" + _remoteSignature);
             return;
         }
-
-        var length = packet.Length;
-
-        if (length < _HeaderSize)
-            throw new("Packet too short. length: " + length);
 
         AckUpto(sendAckWindowhead);
         for (var i = 0; i < _WindowAckBytesSize; ++i) {
