@@ -5,25 +5,25 @@ using System.Diagnostics;
 namespace Plukit.ReliableEndpoint;
 
 /*
- * 
+ *
  * Bidirectional
  * Ensures reliable, ordered delivery of a byte stream
  * Stream orientated and does not preserve message boundaries
  * Not threadsafe
- * 
+ *
  * Call Update() on your tick update tick.
- * 
+ *
  * call SendMessage to send data
  * ReceiveMessageCallback gets called for delivery of data sent by remote side
- * 
+ *
  * TransmitPacketCallback gets called with raw packet data to be put on the network
  * call ReceivePacket with the raw packet data received from the network
- * 
- * 
+ *
+ *
  * transmitPacketCallback(Memory<byte>) -> bool (channel congested/closed)
  * receiveMessageCallback(Memory<byte>)
- * 
- * 
+ *
+ *
  */
 
 public sealed class Channel {
