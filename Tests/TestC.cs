@@ -28,7 +28,7 @@ public sealed class TestC {
             BChannel.SendMessage(new(b, 0, 1));
         }
 
-        for (var c = 0;; ++c) {
+        for (var c = 0; ; ++c) {
             for (var i = 0; i < 20; ++i) {
                 AChannel.Update();
                 BChannel.Update();
