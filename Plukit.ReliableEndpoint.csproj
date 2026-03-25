@@ -10,7 +10,7 @@
         <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
-        <Configurations>DebugLinuxArm32;DebugLinuxX64;DebugWindowsX64;DebugWindowsAOTX64</Configurations>
+        <Configurations>DebugLinuxArm32;DebugLinuxX64;DebugMacOSX64;DebugMacOSArm64;DebugWindowsX64;DebugWindowsAOTX64</Configurations>
         <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
         <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
         <Nullable>enable</Nullable>
@@ -33,6 +33,18 @@
     </PropertyGroup>
 
     <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugLinuxX64|AnyCPU'">
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <DefineConstants>DEBUG;TRACE</DefineConstants>
+        <Optimize>true</Optimize>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugMacOSX64|AnyCPU'">
+        <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+        <DefineConstants>DEBUG;TRACE</DefineConstants>
+        <Optimize>true</Optimize>
+    </PropertyGroup>
+
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='DebugMacOSArm64|AnyCPU'">
         <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
         <DefineConstants>DEBUG;TRACE</DefineConstants>
         <Optimize>true</Optimize>
