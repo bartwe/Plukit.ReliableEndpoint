@@ -237,6 +237,8 @@ public sealed class Channel {
                 }
                 else {
                     packet.SendCount++;
+                    if (packet.SendCount > _MaxStandOff)
+                        packet.SendCount = _MaxStandOff;
                     _sendWindow[oldestMissingPacket] = packet;
                     _oldestPacketResendAckIndex++;
                     _idleAckTS = now;
