@@ -140,11 +140,24 @@ namespace Plukit.ReliableEndpoint {
 
             _resendables.Clear();
 
-            for (var i = 0; i < _sendWindow.Count; ++i)
-                _release(_sendWindow[i].Buffer);
+            if (_messageBuffer != null) {
+                _release(_messageBuffer);
+                _messageBuffer = null;
+                _messageBufferOffset = 0;
+            }
+
+            // Selective acknowledgments and missing packets leave empty slots.
+            for (var i = 0; i < _sendWindow.Count; ++i) {
+                var buffer = _sendWindow[i].Buffer;
+                if (buffer != null)
+                    _release(buffer);
+            }
             _sendWindow.Clear();
-            for (var i = 0; i < _receiveWindow.Count; ++i)
-                _release(_receiveWindow[i].Buffer);
+            for (var i = 0; i < _receiveWindow.Count; ++i) {
+                var buffer = _receiveWindow[i].Buffer;
+                if (buffer != null)
+                    _release(buffer);
+            }
             _receiveWindow.Clear();
         }
 
